@@ -104,17 +104,17 @@ export default function Header({
               </span>
             </div>
             <p className="text-[11px] text-slate-500 font-medium">
-              {isMr ? '१ डॅशबोर्ड • ५००+ मेडिकल स्टोअर्स • स्वतंत्र साठा' : '1 Dashboard • Multi-Tenant Isolated Cloud'}
+              {isMr ? 'स्मार्ट मेडिकल इन्व्हेंटरी आणि बिलिंग' : 'Smart Medical Inventory & Billing'}
             </p>
           </div>
         </div>
 
-        {/* Left Mobile: Mobile Menu Toggle & Store Brand (When sidebar is off-canvas) */}
-        <div className="md:hidden flex items-center gap-2">
+        {/* Left Mobile: Mobile Menu Toggle & Store Brand */}
+        <div className="md:hidden flex items-center gap-1.5 min-w-0">
           <button 
             type="button"
             onClick={onToggleSidebar}
-            className="p-1.5 -ml-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition"
+            className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition shrink-0"
             aria-label="Toggle menu"
           >
             <Menu className="w-5 h-5" />
@@ -122,20 +122,20 @@ export default function Header({
 
           <div 
             onClick={onOpenProfileModal} 
-            className="flex items-center gap-2 cursor-pointer"
+            className="flex items-center gap-1.5 cursor-pointer min-w-0"
           >
             {storeProfile?.logoUrl ? (
               <img 
                 src={storeProfile.logoUrl} 
                 alt="Store Logo" 
-                className="w-7 h-7 rounded-xl object-cover border border-teal-500/30" 
+                className="w-7 h-7 rounded-xl object-cover border border-teal-500/30 shrink-0" 
               />
             ) : (
-              <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-teal-600 to-emerald-500 text-white flex items-center justify-center font-bold text-xs">
+              <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-teal-600 to-emerald-500 text-white flex items-center justify-center font-bold text-xs shrink-0">
                 <span className="font-serif">Rx</span>
               </div>
             )}
-            <h2 className="text-xs font-bold text-slate-900 truncate max-w-[140px]">
+            <h2 className="text-xs font-bold text-slate-900 truncate max-w-[110px] xs:max-w-[140px]">
               {displayName}
             </h2>
           </div>
@@ -163,12 +163,12 @@ export default function Header({
           </div>
         </div>
 
-        {/* Right: Actions */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* Right: Actions (Clean, Responsive, Mobile Optimized) */}
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {/* Color Theme & Profile Quick Button */}
           <button
             onClick={onOpenProfileModal}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 rounded-xl text-xs font-bold transition shadow-xs"
+            className="p-1.5 sm:px-2.5 sm:py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1"
             title={isMr ? 'कलर थीम व प्रोफाईल सेटिंग्ज' : 'Color Theme & Store Profile'}
           >
             <Palette className="w-3.5 h-3.5 text-teal-600" />
@@ -177,14 +177,14 @@ export default function Header({
             </span>
           </button>
 
-          {/* Sound Alert Toggle */}
+          {/* Sound Alert Toggle (Hidden on mobile to save space) */}
           <button
             onClick={() => {
               const next = !audioEnabled;
               setAudioEnabled(next);
               if (next) playSuccessSound();
             }}
-            className={`p-2 rounded-xl border transition ${
+            className={`hidden sm:flex p-2 rounded-xl border transition ${
               audioEnabled 
                 ? 'bg-slate-50 border-slate-200 text-teal-700 hover:bg-teal-50' 
                 : 'bg-slate-100 border-slate-200 text-slate-400 hover:text-slate-600'
@@ -197,10 +197,10 @@ export default function Header({
           {/* Notification Bell with Badge */}
           <button
             onClick={onOpenNotifications}
-            className="relative p-2 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 transition"
+            className="relative p-1.5 sm:p-2 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 transition"
             title={isMr ? 'सूचना केंद्र' : 'Notifications'}
           >
-            <Bell className="w-4 h-4" />
+            <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             {urgentCount > 0 && (
               <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] px-1 items-center justify-center rounded-full bg-rose-600 text-white text-[10px] font-bold shadow-sm animate-pulse">
                 {urgentCount}
@@ -208,39 +208,23 @@ export default function Header({
             )}
           </button>
 
-          {/* Language Toggle (Mr / En) */}
+          {/* Language Toggle (Default English, Option Marathi) */}
           <button
             onClick={() => setLang(isMr ? 'en' : 'mr')}
-            className="px-2.5 py-1.5 text-xs font-extrabold rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-teal-700 transition"
+            className="px-2 py-1.5 sm:px-2.5 sm:py-1.5 text-xs font-black rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-teal-700 transition"
             title={isMr ? 'Switch to English' : 'मराठीत बदला'}
           >
-            {isMr ? 'English' : 'मराठी'}
+            <span className="sm:hidden">{isMr ? 'EN' : 'MR'}</span>
+            <span className="hidden sm:inline">{isMr ? 'English' : 'मराठी'}</span>
           </button>
 
-          {/* Store Profile Button */}
-          <button
-            onClick={onOpenProfileModal}
-            className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition"
-            title={isMr ? 'स्टोअर प्रोफाईल व लोगो बदला' : 'Store Profile & Logo'}
-          >
-            {storeProfile?.logoUrl ? (
-              <img src={storeProfile.logoUrl} alt="Store" className="w-5 h-5 rounded-full object-cover" />
-            ) : (
-              <Store className="w-4 h-4 text-teal-600" />
-            )}
-            <span className="hidden xl:inline">{isMr ? 'प्रोफाईल' : 'Profile'}</span>
-          </button>
-
-
-
-          {/* Add Medicine Button */}
+          {/* Add Medicine Button (Hidden on mobile because bottom floating button exists) */}
           <button
             onClick={onOpenAddModal}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-teal-600/30 transition"
+            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-teal-600/30 transition"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{isMr ? 'औषध जोडा' : 'Add Item'}</span>
-            <span className="sm:hidden">{isMr ? 'जोडा' : 'Add'}</span>
+            <span>{isMr ? 'औषध जोडा' : 'Add Item'}</span>
           </button>
 
           {/* Logout Button */}

@@ -1192,3 +1192,23 @@ export function adminDeleteTenantStore(userId) {
 
   return { success: true };
 }
+
+export function getActiveStoresCount() {
+  try {
+    const central = getCentralDb();
+    let deletedPhones = new Set();
+    try {
+      const deletedRows = central.prepare(`SELECT phone FROM deleted_stores`).all();
+      deletedPhones = new Set(deletedRows.map(r => r.phone));
+    } catch {}
+
+    const allUsers = central.prepare(`SELECT phone FROM users`).all()
+      .filter(u => !deletedPhones.has(u.phone));
+
+    return allUsers.length;
+  } catch (err) {
+    console.warn('Error counting active stores:', err);
+    return 1;
+  }
+}
+

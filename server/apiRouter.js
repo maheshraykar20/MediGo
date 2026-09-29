@@ -31,7 +31,8 @@ import {
   adminSaveTenantVoucher,
   adminDeleteTenantVoucher,
   adminSaveTenantProfile,
-  adminDeleteTenantStore
+  adminDeleteTenantStore,
+  getActiveStoresCount
 } from './dbService.js';
 
 // Helper to parse JSON body from incoming HTTP request
@@ -87,6 +88,15 @@ export async function handleApiRequest(req, res) {
   }
 
   try {
+    // ---------------------------------------------------------
+    // PUBLIC STATS ROUTE (Real Dynamic Active Pharmacy Count)
+    // ---------------------------------------------------------
+    if (pathname === '/api/public/stats' && req.method === 'GET') {
+      const activeCount = getActiveStoresCount();
+      sendJson(res, 200, { success: true, activeStoresCount: activeCount });
+      return true;
+    }
+
     // ---------------------------------------------------------
     // AUTH & OTP ROUTES
     // ---------------------------------------------------------

@@ -54,7 +54,7 @@ const ADMIN_LANG_KEY = 'medvault_admin_lang_v1';
 export default function AdminPortal({ onBackToDashboard }) {
   // Language State: 'mr' (मराठी) or 'en' (English)
   const [lang, setLang] = useState(() => {
-    return localStorage.getItem(ADMIN_LANG_KEY) || 'mr';
+    return localStorage.getItem(ADMIN_LANG_KEY) || 'en';
   });
   const isMr = lang === 'mr';
 
@@ -326,20 +326,20 @@ export default function AdminPortal({ onBackToDashboard }) {
 
   // Delete Tenant Store
   const handleDeleteTenant = async (tenant) => {
-    const promptMsg = isMr 
-      ? `सावधान! हे स्टोअर (${tenant.storeName || tenant.phone}) आणि त्यांची स्वतंत्र .sqlite फाईल कायमस्वरूपी नष्ट होईल. पुष्टी करण्यासाठी स्टोअरचा फोन नंबर (${tenant.phone}) टाका:` 
-      : `CAUTION! Store (${tenant.storeName || tenant.phone}) and its isolated .sqlite database will be permanently deleted. Type phone number (${tenant.phone}) to confirm:`;
-    const input = window.prompt(promptMsg);
-    if (input === tenant.phone) {
-      try {
-        await apiAdminDeleteTenant(tenant.userId);
-        alert(isMr ? 'स्टोअर डेटाबेस फाईल यशस्वीरित्या हटवली.' : 'Store database file permanently removed.');
-        fetchTenants();
-        setSelectedTenantId(null);
-        setTenantData(null);
-      } catch (err) {
-        alert((isMr ? 'त्रुटी: ' : 'Error: ') + err.message);
-      }
+    const storeLabel = tenant.storeName ? `"${tenant.storeName}" (${tenant.phone})` : tenant.phone;
+    const confirmMsg = isMr 
+      ? `सावधान! हे स्टोअर ${storeLabel} आणि त्यांचा संपूर्ण डेटा कायमस्वरूपी नष्ट होईल. तुम्हाला हे स्टोअर नक्की डिलीट करायचे आहे का?` 
+      : `CAUTION! Store ${storeLabel} and its entire database will be permanently deleted. Are you sure you want to delete this store?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      await apiAdminDeleteTenant(tenant.userId);
+      alert(isMr ? 'स्टोअर यशस्वीरित्या हटवले गेले.' : 'Store database permanently removed.');
+      fetchTenants();
+      setSelectedTenantId(null);
+      setTenantData(null);
+    } catch (err) {
+      alert((isMr ? 'त्रुटी: ' : 'Error: ') + err.message);
     }
   };
 
@@ -502,31 +502,31 @@ export default function AdminPortal({ onBackToDashboard }) {
       )}
 
       {/* Super Admin Bright Header */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/90 px-4 sm:px-6 py-3 flex items-center justify-between shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-blue-600 text-white flex items-center justify-center font-bold shadow-md shadow-indigo-500/20">
-            <ShieldCheck className="w-5 h-5" />
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/90 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between shadow-xs">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-blue-600 text-white flex items-center justify-center font-bold shadow-md shadow-indigo-500/20 shrink-0">
+            <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
-          <div className="text-left">
-            <div className="flex items-center gap-2">
-              <h1 className="text-base sm:text-lg font-black tracking-tight text-slate-900 font-heading">
-                MedVault Super Admin DB
+          <div className="text-left min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <h1 className="text-sm sm:text-lg font-black tracking-tight text-slate-900 font-heading truncate">
+                MedVault Admin
               </h1>
-              <span className="px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-full text-[10px] font-bold">
+              <span className="hidden sm:inline-block px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-full text-[10px] font-bold shrink-0">
                 MASTER CONTROLLER
               </span>
             </div>
-            <p className="text-[11px] text-slate-500 font-mono">
-              {isMr ? '५००+ मेडिकल स्टोअर्स • स्वतंत्र SQLite फाइल्स • थेट नियंत्रण' : '500+ Medical Stores • Isolated SQLite Files • Direct Control'}
+            <p className="text-[11px] text-slate-500 font-mono hidden sm:block">
+              {isMr ? 'स्वतंत्र SQLite डेटाबेस • थेट नियंत्रण' : 'Isolated SQLite Database • Direct Control'}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Language Switcher Toggle */}
           <button
             onClick={toggleLanguage}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-100 hover:bg-slate-200 text-indigo-700 text-xs font-bold transition shadow-xs cursor-pointer"
+            className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-100 hover:bg-slate-200 text-indigo-700 text-xs font-bold transition shadow-xs cursor-pointer"
             title={isMr ? 'Switch to English' : 'मराठीत बदला'}
           >
             <Globe className="w-3.5 h-3.5" />
@@ -536,7 +536,7 @@ export default function AdminPortal({ onBackToDashboard }) {
           {/* Audio Chime Toggle */}
           <button
             onClick={() => setAudioAlerts(!audioAlerts)}
-            className={`p-2 rounded-xl border transition cursor-pointer ${
+            className={`p-1.5 sm:p-2 rounded-xl border transition cursor-pointer ${
               audioAlerts 
                 ? 'bg-indigo-50 border-indigo-200 text-indigo-600' 
                 : 'bg-slate-100 border-slate-200 text-slate-400'
@@ -554,7 +554,7 @@ export default function AdminPortal({ onBackToDashboard }) {
               if (selectedTenantId) fetchTenantData(selectedTenantId);
               playSuccessSound();
             }}
-            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 transition cursor-pointer"
+            className="p-1.5 sm:p-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 transition cursor-pointer"
             title={isMr ? 'रिफ्रेश करा' : 'Refresh'}
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-indigo-600' : ''}`} />
@@ -564,17 +564,19 @@ export default function AdminPortal({ onBackToDashboard }) {
           {onBackToDashboard && (
             <button
               onClick={onBackToDashboard}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition cursor-pointer"
+              className="flex items-center gap-1 px-2 sm:px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition cursor-pointer"
+              title={isMr ? 'स्टोअर डॅशबोर्ड' : 'Store Dashboard'}
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{isMr ? 'स्टोअर डॅशबोर्ड' : 'Store Dashboard'}</span>
+              <span className="hidden md:inline">{isMr ? 'स्टोअर' : 'Store'}</span>
             </button>
           )}
 
           {/* Logout Admin */}
           <button
             onClick={handleLogoutAdmin}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition cursor-pointer"
+            className="flex items-center gap-1 px-2 sm:px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition cursor-pointer"
+            title={isMr ? 'लॉगआउट' : 'Logout'}
           >
             <Lock className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">{isMr ? 'लॉगआउट' : 'Logout'}</span>
@@ -685,19 +687,32 @@ export default function AdminPortal({ onBackToDashboard }) {
                         </div>
 
                         <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px]">
-                          <span className="font-mono text-slate-400 truncate max-w-[140px]" title={t.dbFile}>
+                          <span className="font-mono text-slate-400 truncate max-w-[130px]" title={t.dbFile}>
                             {t.dbFile}
                           </span>
-                          <a
-                            href={getAdminSqliteDownloadUrl(t.dbFile)}
-                            download={t.dbFile}
-                            onClick={(e) => e.stopPropagation()}
-                            className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 hover:underline font-bold"
-                            title={isMr ? 'SQLite फाईल डाऊनलोड करा' : 'Download SQLite file'}
-                          >
-                            <Download className="w-3 h-3" />
-                            <span>DB</span>
-                          </a>
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={getAdminSqliteDownloadUrl(t.dbFile)}
+                              download={t.dbFile}
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 hover:underline font-bold"
+                              title={isMr ? 'SQLite फाईल डाऊनलोड करा' : 'Download SQLite file'}
+                            >
+                              <Download className="w-3 h-3" />
+                              <span>DB</span>
+                            </a>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteTenant(t);
+                              }}
+                              className="p-1 rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                              title={isMr ? 'स्टोअर हटवा' : 'Delete store'}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );

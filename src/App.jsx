@@ -79,9 +79,9 @@ export default function App() {
     );
   });
 
-  // 2. Language & Audio Preferences
+  // 2. Language & Audio Preferences (Default: English)
   const [lang, setLang] = useState(() => {
-    return localStorage.getItem(LANG_KEY) || 'mr'; // Marathi or English
+    return localStorage.getItem(LANG_KEY) || 'en'; // Default to English
   });
 
   const [audioEnabled, setAudioEnabled] = useState(() => {

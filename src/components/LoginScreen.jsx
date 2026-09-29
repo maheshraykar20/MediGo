@@ -22,14 +22,16 @@ import {
 } from 'lucide-react';
 import { requestPhoneOTP, verifyPhoneOTP } from '../utils/userStorage';
 import { playSuccessSound, playUrgentAlertSound, playWarningSound } from '../utils/notificationSound';
+import { apiGetPublicStats } from '../utils/apiService';
 
-export default function LoginScreen({ onLoginSuccess, lang = 'mr', setLang }) {
+export default function LoginScreen({ onLoginSuccess, lang = 'en', setLang }) {
   const isMr = lang === 'mr';
 
   const [phoneNumber, setPhoneNumber] = useState('');
   const [pharmacistName, setPharmacistName] = useState('');
   const [storeName, setStoreName] = useState('');
   const [showCustomDetails, setShowCustomDetails] = useState(false);
+  const [activeStoresCount, setActiveStoresCount] = useState(1);
 
   const [step, setStep] = useState('phone'); // 'phone' | 'otp'
   const [otpDigits, setOtpDigits] = useState(['', '', '', '']);
@@ -39,6 +41,25 @@ export default function LoginScreen({ onLoginSuccess, lang = 'mr', setLang }) {
   const [resendCountdown, setResendCountdown] = useState(30);
 
   const otpInputRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
+
+  // Fetch and poll real dynamic count of active registered stores
+  useEffect(() => {
+    let isMounted = true;
+    const fetchCount = async () => {
+      try {
+        const stats = await apiGetPublicStats();
+        if (isMounted && stats && stats.success && typeof stats.activeStoresCount === 'number') {
+          setActiveStoresCount(stats.activeStoresCount);
+        }
+      } catch {}
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 3000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   // Resend Countdown
   useEffect(() => {
@@ -176,12 +197,9 @@ export default function LoginScreen({ onLoginSuccess, lang = 'mr', setLang }) {
               <span className="font-heading font-extrabold text-slate-900 text-base sm:text-lg tracking-tight">
                 MedVault <span className="text-teal-600">Pro</span>
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-50 text-teal-800 border border-teal-200">
-                500+ Pharmacy Cloud
-              </span>
             </div>
             <p className="text-[11px] text-slate-500 font-medium">
-              {isMr ? '१ डॅशबोर्ड • सुरक्षित साठा • Expiry रडार' : '1 Dashboard • Isolated Stock • Expiry Radar'}
+              {isMr ? 'स्मार्ट मेडिकल इन्व्हेंटरी आणि बिलिंग' : 'Smart Medical Inventory & Billing'}
             </p>
           </div>
         </div>
@@ -191,7 +209,7 @@ export default function LoginScreen({ onLoginSuccess, lang = 'mr', setLang }) {
           {/* Security Badge */}
           <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700">
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            <span>FDA 20B/21B Architecture</span>
+            <span>{isMr ? '२५६-बिट सुरक्षित' : '256-Bit Encrypted'}</span>
           </div>
 
           {/* Language Switcher */}
@@ -213,7 +231,7 @@ export default function LoginScreen({ onLoginSuccess, lang = 'mr', setLang }) {
           <div className="lg:col-span-6 space-y-6 text-left">
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-teal-100/70 border border-teal-200 text-teal-900 text-xs font-bold">
               <Sparkles className="w-3.5 h-3.5 text-teal-700" />
-              <span>{isMr ? '५००+ मेडिकल स्टोअर्ससाठी खास तयार' : 'Designed for 500+ Medical Stores'}</span>
+              <span>{isMr ? 'स्वतंत्र व खाजगी मेडिकल डेटाबेस' : 'Private & Isolated Store Database'}</span>
             </div>
 
             <div className="space-y-3">
@@ -225,8 +243,8 @@ export default function LoginScreen({ onLoginSuccess, lang = 'mr', setLang }) {
                   </>
                 ) : (
                   <>
-                    Unified Pharmacy Cloud with <br className="hidden sm:inline" />
-                    <span className="text-teal-600">100% Data Isolation</span> for All Stores
+                    Pharmacy Management with <br className="hidden sm:inline" />
+                    <span className="text-teal-600">100% Data Isolation</span> for Each Store
                   </>
                 )}
               </h1>
@@ -296,13 +314,15 @@ export default function LoginScreen({ onLoginSuccess, lang = 'mr', setLang }) {
               </div>
             </div>
 
-            {/* Testimonials or Stats Counter */}
-            <div className="p-3 rounded-2xl bg-teal-900 text-white flex items-center justify-between text-xs px-4">
+            {/* Real Dynamic Active Pharmacy Network Stats */}
+            <div className="p-3 rounded-2xl bg-teal-900 text-white flex items-center justify-between text-xs px-4 shadow-sm">
               <div className="flex items-center gap-2">
                 <Building2 className="w-4 h-4 text-teal-300" />
                 <span className="font-semibold">{isMr ? 'सक्रिय मेडिकल स्टोअर्स:' : 'Active Pharmacy Network:'}</span>
               </div>
-              <span className="font-mono font-black text-teal-200 text-sm">500+ STORES LIVE</span>
+              <span className="font-mono font-black text-teal-200 text-sm">
+                {activeStoresCount} {activeStoresCount === 1 ? (isMr ? 'स्टोअर LIVE' : 'STORE LIVE') : (isMr ? 'स्टोअर्स LIVE' : 'STORES LIVE')}
+              </span>
             </div>
           </div>
 
@@ -593,8 +613,8 @@ export default function LoginScreen({ onLoginSuccess, lang = 'mr', setLang }) {
                 <ShieldCheck className="w-4 h-4 text-teal-600 shrink-0" />
                 <span>
                   {isMr 
-                    ? '५००+ युजर्सचा डेटा १००% स्वतंत्र व खाजगी राहतो.' 
-                    : 'End-to-End data isolation across 500+ independent stores.'}
+                    ? 'प्रत्येक मेडिकल स्टोअरचा डेटा १००% स्वतंत्र व खाजगी राहतो.' 
+                    : 'Complete data isolation for each medical store.'}
                 </span>
               </div>
             </div>

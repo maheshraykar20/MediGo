@@ -232,3 +232,13 @@ export async function apiAdminDeleteTenant(userId) {
 export function getAdminSqliteDownloadUrl(fileName) {
   return `/api/admin/download-sqlite?file=${encodeURIComponent(fileName)}`;
 }
+
+export async function apiGetPublicStats() {
+  try {
+    const data = await fetchJson('/public/stats');
+    return data;
+  } catch (err) {
+    return { success: true, activeStoresCount: 1 };
+  }
+}
+
