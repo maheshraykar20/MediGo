@@ -47,7 +47,6 @@ import {
   loadUserDataFromDatabase
 } from './utils/userStorage';
 import { THEME_PRESETS, applyDashboardTheme } from './utils/themeUtils';
-import { INITIAL_MEDICINES } from './data/initialMedicines';
 import { getDaysUntilExpiry } from './utils/expiryUtils';
 import { playUrgentAlertSound, playSuccessSound } from './utils/notificationSound';
 import { sendMedicineExpiryNotification } from './utils/browserNotification';
@@ -185,10 +184,24 @@ export default function App() {
       isDataLoadedRef.current = false;
       activeUserIdRef.current = currentUser.id;
 
+      // Ensure fresh slate while loading this user's data
+      setMedicines([]);
+      setVouchers([]);
+      setStoreProfile(DEFAULT_PROFILE);
+      setCustomCategories([]);
+
       loadUserDataFromDatabase(currentUser.id).then((dbData) => {
+        if (activeUserIdRef.current !== currentUser.id) return; // Prevent race conditions if user switched
+
         if (dbData) {
-          setMedicines(Array.isArray(dbData.medicines) ? dbData.medicines : []);
-          setVouchers(Array.isArray(dbData.vouchers) ? dbData.vouchers : []);
+          const loadedMeds = Array.isArray(dbData.medicines) 
+            ? dbData.medicines.map(m => ({ ...m, userId: currentUser.id }))
+            : [];
+          const loadedVchs = Array.isArray(dbData.vouchers)
+            ? dbData.vouchers.map(v => ({ ...v, userId: currentUser.id }))
+            : [];
+          setMedicines(loadedMeds);
+          setVouchers(loadedVchs);
           setStoreProfile(dbData.profile || DEFAULT_PROFILE);
           setCustomCategories(Array.isArray(dbData.categories) ? dbData.categories : []);
           if (dbData.theme) {
@@ -196,15 +209,19 @@ export default function App() {
             applyDashboardTheme(dbData.theme);
           }
         } else {
-          setMedicines(getUserInventory(currentUser.id));
-          setVouchers(getUserVouchers(currentUser.id));
+          const loadedMeds = getUserInventory(currentUser.id).map(m => ({ ...m, userId: currentUser.id }));
+          const loadedVchs = getUserVouchers(currentUser.id).map(v => ({ ...v, userId: currentUser.id }));
+          setMedicines(loadedMeds);
+          setVouchers(loadedVchs);
           setStoreProfile(getUserProfile(currentUser.id, DEFAULT_PROFILE));
           setCustomCategories(getUserCategories(currentUser.id));
         }
         isDataLoadedRef.current = true;
       }).catch((e) => {
         console.warn('SQLite load warning:', e);
-        isDataLoadedRef.current = true;
+        if (activeUserIdRef.current === currentUser.id) {
+          isDataLoadedRef.current = true;
+        }
       });
     } else {
       isDataLoadedRef.current = false;
@@ -263,44 +280,16 @@ export default function App() {
   }, [currentUser?.id, lang]);
 
   // Handle User Login Success (From full screen LoginScreen or LoginModal)
-  const handleLoginSuccess = async (user) => {
+  const handleLoginSuccess = (user) => {
     isDataLoadedRef.current = false;
     activeUserIdRef.current = user.id;
+    // Wipe previous in-memory state so no previous user's data lingers
+    setMedicines([]);
+    setVouchers([]);
+    setStoreProfile(DEFAULT_PROFILE);
+    setCustomCategories([]);
     setCurrentUserState(user);
     setIsLoginModalOpen(false);
-
-    try {
-      const dbData = await loadUserDataFromDatabase(user.id);
-      if (dbData) {
-        setMedicines(Array.isArray(dbData.medicines) ? dbData.medicines : []);
-        setVouchers(Array.isArray(dbData.vouchers) ? dbData.vouchers : []);
-        setStoreProfile(dbData.profile || DEFAULT_PROFILE);
-        setCustomCategories(Array.isArray(dbData.categories) ? dbData.categories : []);
-        if (dbData.theme) {
-          setCurrentTheme(dbData.theme);
-          applyDashboardTheme(dbData.theme);
-        }
-        isDataLoadedRef.current = true;
-        setActiveView('dashboard');
-        return;
-      }
-    } catch (err) {
-      console.warn('Fallback to local storage data:', err);
-    }
-
-    const loadedMeds = getUserInventory(user.id);
-    const loadedVouchers = getUserVouchers(user.id);
-    const loadedProfile = getUserProfile(user.id, DEFAULT_PROFILE);
-    const loadedCategories = getUserCategories(user.id);
-    const loadedTheme = getUserTheme(user.id) || THEME_PRESETS[0];
-
-    setMedicines(loadedMeds);
-    setVouchers(loadedVouchers);
-    setStoreProfile(loadedProfile);
-    setCustomCategories(loadedCategories);
-    setCurrentTheme(loadedTheme);
-    applyDashboardTheme(loadedTheme);
-    isDataLoadedRef.current = true;
     setActiveView('dashboard');
   };
 
@@ -367,14 +356,26 @@ export default function App() {
     applyDashboardTheme(theme);
   };
 
-  // Compute Expiry Urgency Groups
+  // Multi-Tenant Isolation Condition: User A ONLY sees User A's products/vouchers,
+  // User B ONLY sees User B's, and User C ONLY sees User C's (strict isolation guarantee).
+  const userIsolatedMedicines = useMemo(() => {
+    if (!currentUser?.id) return [];
+    return medicines.filter((m) => !m.userId || m.userId === currentUser.id);
+  }, [medicines, currentUser?.id]);
+
+  const userIsolatedVouchers = useMemo(() => {
+    if (!currentUser?.id) return [];
+    return vouchers.filter((v) => !v.userId || v.userId === currentUser.id);
+  }, [vouchers, currentUser?.id]);
+
+  // Compute Expiry Urgency Groups from isolated medicines
   const { tomorrowMedicines, expiredMedicines, critical7Medicines, warning30Medicines } = useMemo(() => {
     const tomorrow = [];
     const expired = [];
     const critical7 = [];
     const warning30 = [];
 
-    medicines.forEach((m) => {
+    userIsolatedMedicines.forEach((m) => {
       const days = getDaysUntilExpiry(m.expiryDate);
       if (days < 0) {
         expired.push(m);
@@ -393,7 +394,7 @@ export default function App() {
       critical7Medicines: critical7,
       warning30Medicines: warning30,
     };
-  }, [medicines]);
+  }, [userIsolatedMedicines]);
 
   // Initial sound / notification check on app launch
   useEffect(() => {
@@ -412,22 +413,26 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [currentUser]);
 
-  // CRUD Handlers for Medicines
+  // CRUD Handlers for Medicines (Strictly isolated by currentUser.id)
   const handleSaveMedicine = (medicineData) => {
+    if (!currentUser?.id) return;
+    const medWithUser = {
+      ...medicineData,
+      userId: currentUser.id
+    };
+
     setMedicines((prev) => {
-      const existsIndex = prev.findIndex((m) => m.id === medicineData.id);
+      const existsIndex = prev.findIndex((m) => m.id === medWithUser.id);
       if (existsIndex >= 0) {
         const updated = [...prev];
-        updated[existsIndex] = medicineData;
+        updated[existsIndex] = medWithUser;
         return updated;
       }
-      return [medicineData, ...prev];
+      return [medWithUser, ...prev];
     });
 
     // Directly save and log notification for this specific medicine
-    if (currentUser?.id) {
-      apiSaveMedicine(currentUser.id, medicineData).catch(e => console.warn('SQLite medicine save:', e));
-    }
+    apiSaveMedicine(currentUser.id, medWithUser).catch(e => console.warn('SQLite medicine save:', e));
   };
 
   const handleDeleteMedicine = (id) => {
@@ -449,16 +454,16 @@ export default function App() {
   };
 
   const handleImportComplete = (importedMeds, mode = 'append', invoiceMeta = null) => {
+    if (!currentUser?.id) return;
+    const medsWithUser = importedMeds.map(m => ({ ...m, userId: currentUser.id }));
     let nextMeds = [];
     if (mode === 'replace') {
-      nextMeds = importedMeds;
+      nextMeds = medsWithUser;
     } else {
-      nextMeds = [...importedMeds, ...medicines];
+      nextMeds = [...medsWithUser, ...medicines];
     }
     setMedicines(nextMeds);
-    if (currentUser?.id) {
-      apiSyncInventory(currentUser.id, nextMeds, true).catch(e => console.warn('SQLite excel import sync:', e));
-    }
+    apiSyncInventory(currentUser.id, nextMeds, true).catch(e => console.warn('SQLite excel import sync:', e));
 
     // Auto-create purchase voucher if invoiceMeta was detected or requested
     if (invoiceMeta && importedMeds.length > 0) {
@@ -521,27 +526,31 @@ export default function App() {
     }
   };
 
-  // CRUD Handlers for Vouchers
+  // CRUD Handlers for Vouchers (Strictly isolated by currentUser.id)
   const handleSaveVoucher = (voucherData) => {
+    if (!currentUser?.id) return;
+    const voucherWithUser = {
+      ...voucherData,
+      userId: currentUser.id,
+    };
+
     setVouchers((prev) => {
-      const existsIndex = prev.findIndex((v) => v.id === voucherData.id);
+      const existsIndex = prev.findIndex((v) => v.id === voucherWithUser.id);
       if (existsIndex >= 0) {
         const updated = [...prev];
-        updated[existsIndex] = voucherData;
+        updated[existsIndex] = voucherWithUser;
         return updated;
       }
-      return [voucherData, ...prev];
+      return [voucherWithUser, ...prev];
     });
 
-    if (currentUser?.id) {
-      apiSaveVoucher(currentUser.id, voucherData).catch(e => console.warn('SQLite voucher save:', e));
-    }
+    apiSaveVoucher(currentUser.id, voucherWithUser).catch(e => console.warn('SQLite voucher save:', e));
 
     // Auto-update inventory stock if requested
-    if (voucherData.updateStock && voucherData.items && voucherData.items.length > 0) {
+    if (voucherWithUser.updateStock && voucherWithUser.items && voucherWithUser.items.length > 0) {
       setMedicines((prevMeds) => {
         const updatedMeds = [...prevMeds];
-        voucherData.items.forEach((vItem) => {
+        voucherWithUser.items.forEach((vItem) => {
           if (!vItem.name) return;
           const trimmedName = vItem.name.trim().toLowerCase();
           const existingIdx = updatedMeds.findIndex((m) =>
@@ -553,7 +562,7 @@ export default function App() {
 
           if (existingIdx >= 0) {
             const current = updatedMeds[existingIdx];
-            if (voucherData.voucherType === 'PURCHASE') {
+            if (voucherWithUser.voucherType === 'PURCHASE') {
               updatedMeds[existingIdx] = {
                 ...current,
                 stock: (current.stock || 0) + qty,
@@ -561,17 +570,20 @@ export default function App() {
                 mrp: vItem.mrp || current.mrp,
                 expiryDate: vItem.expiryDate || current.expiryDate,
                 batchNo: vItem.batchNo || current.batchNo,
+                userId: currentUser.id,
               };
-            } else if (voucherData.voucherType === 'SALES' || voucherData.voucherType === 'RETURN') {
+            } else if (voucherWithUser.voucherType === 'SALES' || voucherWithUser.voucherType === 'RETURN') {
               updatedMeds[existingIdx] = {
                 ...current,
                 stock: Math.max(0, (current.stock || 0) - qty),
+                userId: currentUser.id,
               };
             }
-          } else if (voucherData.voucherType === 'PURCHASE') {
+          } else if (voucherWithUser.voucherType === 'PURCHASE') {
             // Add new medicine to inventory
             const newMed = {
               id: `med-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              userId: currentUser.id,
               name: vItem.name,
               composition: vItem.name,
               category: 'Tablets & Capsules',
@@ -582,10 +594,10 @@ export default function App() {
               purchasePrice: vItem.rate || 25,
               mrp: vItem.mrp || (vItem.rate ? +(vItem.rate * 1.3).toFixed(2) : 35),
               rack: 'Rack A-1',
-              manufacturer: voucherData.partyName || 'Pharma Supplier',
+              manufacturer: voucherWithUser.partyName || 'Pharma Supplier',
               schedule: 'OTC',
               minStock: 10,
-              distributor: voucherData.partyName || 'Direct Purchase',
+              distributor: voucherWithUser.partyName || 'Direct Purchase',
               status: 'active',
             };
             updatedMeds.unshift(newMed);
@@ -646,11 +658,11 @@ export default function App() {
         onLogout={handleRequestLogout}
         currentUser={currentUser}
         storeProfile={storeProfile}
-        totalMedicines={medicines.length}
+        totalMedicines={userIsolatedMedicines.length}
         tomorrowCount={tomorrowMedicines.length}
         expiredCount={expiredMedicines.length}
         critical7Count={critical7Medicines.length}
-        vouchersCount={vouchers.length}
+        vouchersCount={userIsolatedVouchers.length}
         onResetData={handleResetData}
         lang={lang}
       />
@@ -703,7 +715,7 @@ export default function App() {
           {activeView === 'dashboard' && (
             <div className="space-y-6">
               <StatsOverview
-                medicines={medicines}
+                medicines={userIsolatedMedicines}
                 tomorrowCount={tomorrowMedicines.length}
                 expiredCount={expiredMedicines.length}
                 critical7Count={critical7Medicines.length}
@@ -713,7 +725,7 @@ export default function App() {
               />
 
               <MedicineList
-                medicines={medicines}
+                medicines={userIsolatedMedicines}
                 onOpenAddModal={() => {
                   setEditingMedicine(null);
                   setIsAddModalOpen(true);
@@ -737,7 +749,7 @@ export default function App() {
           {/* VIEW 2: ALL MEDICINES */}
           {activeView === 'medicines' && (
             <MedicineList
-              medicines={medicines}
+              medicines={userIsolatedMedicines}
               onOpenAddModal={() => {
                 setEditingMedicine(null);
                 setIsAddModalOpen(true);
@@ -760,7 +772,7 @@ export default function App() {
           {/* VIEW 3: EXPIRY WATCH RADAR */}
           {activeView === 'expiry' && (
             <ExpiryRadarView
-              medicines={medicines}
+              medicines={userIsolatedMedicines}
               onSelectMedicine={handleSelectMedicine}
               onEditMedicine={handleEditMedicine}
               storeProfile={storeProfile}
@@ -772,7 +784,7 @@ export default function App() {
           {/* VIEW 4: VOUCHER REGISTER (PURCHASE / SALES / EXPIRY RETURN) */}
           {activeView === 'vouchers' && (
             <VoucherView
-              vouchers={vouchers}
+              vouchers={userIsolatedVouchers}
               onOpenNewVoucher={() => {
                 setEditingVoucher(null);
                 setIsVoucherModalOpen(true);
@@ -802,7 +814,8 @@ export default function App() {
           {/* VIEW 6: ANALYTICS & LOSS INTELLIGENCE */}
           {activeView === 'analytics' && (
             <AnalyticsView
-              medicines={medicines}
+              medicines={userIsolatedMedicines}
+              vouchers={userIsolatedVouchers}
               storeProfile={storeProfile}
               lang={lang}
             />

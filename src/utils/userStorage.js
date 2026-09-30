@@ -422,23 +422,35 @@ export async function loadUserDataFromDatabase(userId) {
 
     const result = {};
     if (invRes.status === 'fulfilled' && invRes.value?.medicines) {
-      saveUserInventory(userId, invRes.value.medicines);
-      result.medicines = invRes.value.medicines;
+      const taggedMeds = invRes.value.medicines.map(m => ({ ...m, userId }));
+      try {
+        localStorage.setItem(`medvault_inventory_${userId}`, JSON.stringify(taggedMeds));
+      } catch {}
+      result.medicines = taggedMeds;
     }
     if (vchRes.status === 'fulfilled' && vchRes.value?.vouchers) {
-      saveUserVouchers(userId, vchRes.value.vouchers);
-      result.vouchers = vchRes.value.vouchers;
+      const taggedVchs = vchRes.value.vouchers.map(v => ({ ...v, userId }));
+      try {
+        localStorage.setItem(`medvault_vouchers_${userId}`, JSON.stringify(taggedVchs));
+      } catch {}
+      result.vouchers = taggedVchs;
     }
     if (profRes.status === 'fulfilled' && profRes.value?.profile) {
-      saveUserProfile(userId, profRes.value.profile);
+      try {
+        localStorage.setItem(`medvault_profile_${userId}`, JSON.stringify(profRes.value.profile));
+      } catch {}
       result.profile = profRes.value.profile;
     }
     if (catRes.status === 'fulfilled' && catRes.value?.categories) {
-      saveUserCategories(userId, catRes.value.categories);
+      try {
+        localStorage.setItem(`medvault_categories_${userId}`, JSON.stringify(catRes.value.categories));
+      } catch {}
       result.categories = catRes.value.categories;
     }
     if (themeRes.status === 'fulfilled' && themeRes.value?.theme) {
-      saveUserTheme(userId, themeRes.value.theme);
+      try {
+        localStorage.setItem(`medvault_theme_${userId}`, JSON.stringify(themeRes.value.theme));
+      } catch {}
       result.theme = themeRes.value.theme;
     }
     return result;

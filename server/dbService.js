@@ -501,6 +501,7 @@ export function getDbUserInventory(userId) {
 
   return rows.map(r => ({
     id: r.id,
+    userId: userId,
     name: r.name,
     composition: r.composition,
     category: r.category,
@@ -689,6 +690,7 @@ export function getDbUserVouchers(userId) {
 
   return rows.map(r => ({
     id: r.id,
+    userId: userId,
     voucherNo: r.voucher_no,
     voucherType: r.voucher_type,
     partyName: r.party_name,
