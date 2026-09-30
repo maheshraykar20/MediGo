@@ -28,7 +28,8 @@ import {
   ExternalLink,
   Layers,
   Sparkles,
-  Globe
+  Globe,
+  Archive
 } from 'lucide-react';
 import { 
   apiAdminGetNotifications, 
@@ -148,9 +149,11 @@ export default function AdminPortal({ onBackToDashboard }) {
       const data = await apiAdminGetTenants();
       if (data && data.success) {
         setTenants(data.databases || []);
-        // Automatically select first tenant if none selected
+        // Automatically select first tenant on desktop view if none selected
         if (!selectedTenantId && data.databases && data.databases.length > 0) {
-          setSelectedTenantId(data.databases[0].userId);
+          if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
+            setSelectedTenantId(data.databases[0].userId);
+          }
         }
       }
     } catch (err) {
@@ -452,16 +455,18 @@ export default function AdminPortal({ onBackToDashboard }) {
     );
   });
 
-  const activeTenant = tenants.find(t => t.userId === selectedTenantId)
-    || (tenantData?.user ? {
-        userId: selectedTenantId || tenantData.user.id,
-        phone: tenantData.user.phone || (selectedTenantId ? selectedTenantId.replace(/[^0-9]/g, '').slice(-10) : ''),
-        name: tenantData.profile?.ownerName || tenantData.user.name || 'Store Owner',
-        storeName: tenantData.profile?.storeName || tenantData.user.store_name || `Medical Store (${tenantData.user.phone || ''})`,
-        dbFile: `store_${tenantData.user.phone || ''}.sqlite`,
-        fileSizeFormatted: 'SQLite DB',
-        medicinesCount: tenantData.medicines?.length || 0
-      } : tenants[0]);
+  const activeTenant = selectedTenantId
+    ? (tenants.find(t => t.userId === selectedTenantId)
+      || (tenantData?.user ? {
+          userId: selectedTenantId || tenantData.user.id,
+          phone: tenantData.user.phone || (selectedTenantId ? selectedTenantId.replace(/[^0-9]/g, '').slice(-10) : ''),
+          name: tenantData.profile?.ownerName || tenantData.user.name || 'Store Owner',
+          storeName: tenantData.profile?.storeName || tenantData.user.store_name || `Medical Store (${tenantData.user.phone || ''})`,
+          dbFile: `store_${tenantData.user.phone || ''}.sqlite`,
+          fileSizeFormatted: 'SQLite DB',
+          medicinesCount: tenantData.medicines?.length || 0
+        } : null))
+    : null;
 
   // -------------------------------------------------------------
   // RENDER 2: SUPER ADMIN DASHBOARD (BRIGHT & PROFESSIONAL THEME)
@@ -598,7 +603,7 @@ export default function AdminPortal({ onBackToDashboard }) {
       {/* Main Admin Workspace Layout */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* LEFT COLUMN: TENANT STORES & LIVE NOTIFICATIONS */}
-        <aside className="w-full lg:w-80 xl:w-96 border-b lg:border-b-0 lg:border-r border-slate-200 bg-white flex flex-col shrink-0">
+        <aside className={`w-full lg:w-80 xl:w-96 border-b lg:border-b-0 lg:border-r border-slate-200 bg-white flex flex-col shrink-0 ${selectedTenantId ? 'hidden lg:flex' : 'flex'}`}>
           {/* Top Sub-tabs: All Stores vs Notifications */}
           <div className="p-3 border-b border-slate-200 flex gap-2 bg-slate-50/50">
             <button
@@ -662,7 +667,9 @@ export default function AdminPortal({ onBackToDashboard }) {
                         key={t.userId}
                         onClick={() => {
                           setSelectedTenantId(t.userId);
-                          setDetailTab('medicines'); // Automatically show their medicines/products
+                          setTenantData(null);
+                          setDetailTab('medicines');
+                          fetchTenantData(t.userId);
                         }}
                         className={`p-3 rounded-2xl border transition cursor-pointer text-left ${
                           isSelected 
@@ -823,7 +830,21 @@ export default function AdminPortal({ onBackToDashboard }) {
         </aside>
 
         {/* RIGHT COLUMN: SELECTED TENANT LIVE DATABASE EXPLORER & EDITOR */}
-        <main className="flex-1 flex flex-col overflow-y-auto p-4 sm:p-6 space-y-6 bg-slate-50">
+        <main className={`flex-1 flex flex-col overflow-y-auto p-4 sm:p-6 space-y-6 bg-slate-50 ${!selectedTenantId ? 'hidden lg:flex' : 'flex'}`}>
+          {/* Mobile Back Button to Store List */}
+          {selectedTenantId && (
+            <button
+              onClick={() => {
+                setSelectedTenantId(null);
+                setTenantData(null);
+              }}
+              className="lg:hidden flex items-center gap-2 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition border border-indigo-200 self-start cursor-pointer shadow-xs"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>{isMr ? '← सर्व स्टोअर्सची यादी' : '← Back to All Stores'}</span>
+            </button>
+          )}
+
           {activeTenant ? (
             <>
               {/* Tenant Header Banner */}
@@ -949,6 +970,22 @@ export default function AdminPortal({ onBackToDashboard }) {
                 >
                   <Activity className="w-4 h-4" />
                   <span>{isMr ? 'ऑडिट नोंदी' : 'Audit Logs'}</span>
+                </button>
+
+                <button
+                  onClick={() => setDetailTab('archive')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs sm:text-sm font-bold transition whitespace-nowrap cursor-pointer ${
+                    detailTab === 'archive'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <Archive className="w-4 h-4" />
+                  <span>
+                    {isMr 
+                      ? `रिसेट डेटा बॅकअप (${(tenantData?.archivedMedicines?.length || 0) + (tenantData?.archivedVouchers?.length || 0)})` 
+                      : `Reset Archive (${(tenantData?.archivedMedicines?.length || 0) + (tenantData?.archivedVouchers?.length || 0)})`}
+                  </span>
                 </button>
               </div>
 
@@ -1250,6 +1287,115 @@ export default function AdminPortal({ onBackToDashboard }) {
                         )}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 5: PRESERVED USER RESET ARCHIVE */}
+              {detailTab === 'archive' && (
+                <div className="bg-white border border-slate-200/90 rounded-3xl p-4 sm:p-6 shadow-xs space-y-6 text-left">
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 flex items-center gap-2">
+                      <Archive className="w-4 h-4 text-amber-600" />
+                      <span>{isMr ? 'युजरने रिसेट केलेला डेटा (DB Admin Archive)' : 'User Reset Data (Preserved in DB Admin Archive)'}</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {isMr 
+                        ? 'युजरने त्यांच्या डॅशबोर्डमधून डेटा रिसेट केला तरी तो डेटाबेस ॲडमिनमध्ये कायमस्वरूपी सुरक्षित सेव्ह राहतो.' 
+                        : 'Even if the user resets their dashboard, all medicines and vouchers remain safely preserved in DB Admin.'}
+                    </p>
+                  </div>
+
+                  {/* Archived Medicines Table */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                      <Pill className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>{isMr ? `जतन केलेली औषधे (${tenantData?.archivedMedicines?.length || 0})` : `Preserved Medicines (${tenantData?.archivedMedicines?.length || 0})`}</span>
+                    </h4>
+                    <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-xs">
+                      <table className="w-full text-left text-xs text-slate-700">
+                        <thead className="bg-amber-50/60 text-slate-700 font-bold border-b border-amber-200 uppercase tracking-wider text-[11px]">
+                          <tr>
+                            <th className="p-3">{isMr ? 'रिसेट तारीख/वेळ' : 'Archived At'}</th>
+                            <th className="p-3">{isMr ? 'औषधाचे नाव' : 'Medicine Name'}</th>
+                            <th className="p-3">{isMr ? 'बॅच' : 'Batch'}</th>
+                            <th className="p-3">{isMr ? 'Expiry' : 'Expiry'}</th>
+                            <th className="p-3">{isMr ? 'स्टॉक' : 'Stock'}</th>
+                            <th className="p-3">{isMr ? 'MRP' : 'MRP'}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {tenantData?.archivedMedicines && tenantData.archivedMedicines.length > 0 ? (
+                            tenantData.archivedMedicines.map((m, idx) => (
+                              <tr key={m.id || idx} className="hover:bg-amber-50/30 transition">
+                                <td className="p-3 font-mono text-slate-500 whitespace-nowrap">
+                                  {m.archivedAt ? new Date(m.archivedAt).toLocaleString() : '-'}
+                                </td>
+                                <td className="p-3 font-bold text-slate-900">{m.name}</td>
+                                <td className="p-3 font-mono text-indigo-700 font-semibold">{m.batchNo || '-'}</td>
+                                <td className="p-3 font-mono text-slate-600">{m.expiryDate || '-'}</td>
+                                <td className="p-3 font-bold text-slate-800">{m.stock} {m.unit || 'Strips'}</td>
+                                <td className="p-3 font-black text-emerald-700">₹{m.mrp}</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan="6" className="p-6 text-center text-slate-400">
+                                {isMr ? 'या स्टोअरने कोणताही औषध डेटा रिसेट केलेला नाही.' : 'No archived medicines found for this store.'}
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Archived Vouchers Table */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                      <Receipt className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>{isMr ? `जतन केलेली व्हाउचर्स / बिले (${tenantData?.archivedVouchers?.length || 0})` : `Preserved Vouchers (${tenantData?.archivedVouchers?.length || 0})`}</span>
+                    </h4>
+                    <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-xs">
+                      <table className="w-full text-left text-xs text-slate-700">
+                        <thead className="bg-amber-50/60 text-slate-700 font-bold border-b border-amber-200 uppercase tracking-wider text-[11px]">
+                          <tr>
+                            <th className="p-3">{isMr ? 'रिसेट तारीख/वेळ' : 'Archived At'}</th>
+                            <th className="p-3">{isMr ? 'प्रकार' : 'Type'}</th>
+                            <th className="p-3">{isMr ? 'व्हाउचर क्र.' : 'Voucher No'}</th>
+                            <th className="p-3">{isMr ? 'पार्टी नाव' : 'Party Name'}</th>
+                            <th className="p-3">{isMr ? 'तारीख' : 'Date'}</th>
+                            <th className="p-3">{isMr ? 'रक्कम' : 'Total Amount'}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {tenantData?.archivedVouchers && tenantData.archivedVouchers.length > 0 ? (
+                            tenantData.archivedVouchers.map((v, idx) => (
+                              <tr key={v.id || idx} className="hover:bg-amber-50/30 transition">
+                                <td className="p-3 font-mono text-slate-500 whitespace-nowrap">
+                                  {v.archivedAt ? new Date(v.archivedAt).toLocaleString() : '-'}
+                                </td>
+                                <td className="p-3">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                    {v.voucherType || 'PURCHASE'}
+                                  </span>
+                                </td>
+                                <td className="p-3 font-mono font-bold text-slate-900">{v.voucherNo || '-'}</td>
+                                <td className="p-3 font-medium text-slate-800">{v.partyName || '-'}</td>
+                                <td className="p-3 font-mono text-slate-600">{v.date || '-'}</td>
+                                <td className="p-3 font-black text-emerald-700">₹{v.grandTotal || 0}</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan="6" className="p-6 text-center text-slate-400">
+                                {isMr ? 'या स्टोअरने कोणतीही व्हाउचर्स रिसेट केलेली नाहीत.' : 'No archived vouchers found for this store.'}
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}

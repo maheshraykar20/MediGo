@@ -10,9 +10,10 @@ import {
   ArrowRight,
   RefreshCw,
   Plus,
-  FileCheck
+  FileCheck,
+  Receipt
 } from 'lucide-react';
-import { parseExcelFile, downloadSampleTemplate } from '../utils/excelUtils';
+import { parseInvoiceDocument, downloadSampleTemplate } from '../utils/excelUtils';
 import { playSuccessSound } from '../utils/notificationSound';
 import { formatDisplayDate } from '../utils/expiryUtils';
 
@@ -28,6 +29,7 @@ export default function ExcelImportModal({
   const [isProcessing, setIsProcessing] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [importMode, setImportMode] = useState('append'); // 'append' or 'replace'
+  const [createVoucher, setCreateVoucher] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const inputRef = useRef(null);
 
@@ -64,14 +66,14 @@ export default function ExcelImportModal({
     setIsProcessing(true);
 
     try {
-      const result = await parseExcelFile(selectedFile);
+      const result = await parseInvoiceDocument(selectedFile);
       setParsedData(result);
     } catch (err) {
       console.error(err);
       setErrorMsg(
         isMr
-          ? 'एक्सेल फाईल वाचण्यात त्रुटी आली. कृपया फाईलचे फॉरमॅट तपासा किंवा सॅम्पल शीट डाऊनलोड करून पहा.'
-          : 'Could not parse Excel file. Please ensure it has valid columns or download our sample template.'
+          ? 'फाईल वाचण्यात त्रुटी आली. कृपया फाईलचे फॉरमॅट तपासा किंवा सॅम्पल शीट डाऊनलोड करून पहा: ' + err.message
+          : 'Could not parse invoice / Excel file: ' + err.message
       );
     } finally {
       setIsProcessing(false);
@@ -81,7 +83,11 @@ export default function ExcelImportModal({
   const handleConfirmImport = () => {
     if (!parsedData || parsedData.medicines.length === 0) return;
 
-    onImportComplete(parsedData.medicines, importMode);
+    onImportComplete(
+      parsedData.medicines, 
+      importMode, 
+      createVoucher ? parsedData.invoiceMeta : null
+    );
     playSuccessSound();
     onClose();
     // Reset state
@@ -107,10 +113,10 @@ export default function ExcelImportModal({
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                {isMr ? 'एक्सेल शीट द्वारे औषधे अपलोड करा' : 'Bulk Upload Medicines via Excel'}
+                {isMr ? 'एक्सेल किंवा इनव्हॉईस द्वारे औषधे अपलोड करा' : 'Bulk Upload Medicines via Excel or Invoice'}
               </h3>
               <p className="text-xs text-slate-500">
-                {isMr ? '.xlsx, .xls किंवा .csv फाईल अपलोड करा' : 'Supports Excel .xlsx, .xls and .csv files'}
+                {isMr ? '.xlsx, .xls, .csv किंवा .pdf इनव्हॉईस फाईल अपलोड करा' : 'Supports Excel (.xlsx, .xls, .csv) & PDF Bills'}
               </p>
             </div>
           </div>
@@ -168,7 +174,7 @@ export default function ExcelImportModal({
               <input
                 ref={inputRef}
                 type="file"
-                accept=".xlsx, .xls, .csv"
+                accept=".xlsx, .xls, .csv, .pdf, application/pdf"
                 onChange={handleFileInput}
                 className="hidden"
               />
@@ -178,16 +184,16 @@ export default function ExcelImportModal({
               </div>
 
               <div className="font-bold text-slate-800 text-sm">
-                {isMr ? 'येथे एक्सेल फाईल ड्रॅग करा किंवा क्लिक करा' : 'Drag & drop Excel file here, or click to browse'}
+                {isMr ? 'येथे एक्सेल किंवा PDF इनव्हॉईस ड्रॅग करा, किंवा क्लिक करा' : 'Drag & drop Excel or PDF invoice here, or click to browse'}
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                {isMr ? '.XLSX, .XLS, .CSV (कोणत्याही कॉलम्सचे ऑटो-डिटेक्शन)' : '.XLSX, .XLS, .CSV (Automatic header detection)'}
+                {isMr ? '.XLSX, .XLS, .CSV किंवा PDF बिल (Marg / Busy / Tally फॉरमॅट ऑटो-डिटेक्शन)' : '.XLSX, .XLS, .CSV, .PDF (Automatic format & column detection)'}
               </p>
 
               {isProcessing && (
                 <div className="mt-4 flex items-center justify-center gap-2 text-xs font-semibold text-emerald-700">
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>{isMr ? 'शीट वाचत आहे...' : 'Processing Excel rows...'}</span>
+                  <span>{isMr ? 'शीट/बिल वाचत आहे...' : 'Processing Excel / PDF invoice...'}</span>
                 </div>
               )}
             </div>
@@ -215,6 +221,57 @@ export default function ExcelImportModal({
                   {isMr ? 'दुसरी फाईल निवडा' : 'Change File'}
                 </button>
               </div>
+
+              {/* Detected Invoice Metadata Banner */}
+              {parsedData.invoiceMeta && (
+                <div className="p-3 rounded-xl bg-teal-50/80 border border-teal-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-left">
+                  <div className="flex items-center gap-2">
+                    <Receipt className="w-4 h-4 text-teal-700 shrink-0" />
+                    <div>
+                      <span className="font-bold text-teal-950">
+                        {parsedData.invoiceMeta.supplierName}
+                      </span>
+                      <div className="text-[11px] text-teal-700 flex items-center gap-2">
+                        <span>Inv: <b className="font-mono text-slate-800">{parsedData.invoiceMeta.invoiceNo}</b></span>
+                        <span>•</span>
+                        <span>Date: <b className="font-mono text-slate-800">{parsedData.invoiceMeta.invoiceDate}</b></span>
+                      </div>
+                    </div>
+                  </div>
+                  {parsedData.invoiceMeta.grandTotal > 0 && (
+                    <div className="text-right">
+                      <div className="text-[10px] text-teal-600 font-bold uppercase tracking-wider">
+                        {isMr ? 'एकूण रक्कम' : 'Total Amount'}
+                      </div>
+                      <div className="text-sm font-black text-teal-900 font-mono">
+                        ₹{parsedData.invoiceMeta.grandTotal.toFixed(2)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Auto Create Purchase Voucher Checkbox */}
+              <label className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-50/60 border border-emerald-200 text-xs cursor-pointer text-left">
+                <input
+                  type="checkbox"
+                  checked={createVoucher}
+                  onChange={(e) => setCreateVoucher(e.target.checked)}
+                  className="mt-0.5 rounded text-teal-600 focus:ring-teal-500 w-4 h-4 shrink-0"
+                />
+                <div>
+                  <div className="font-bold text-slate-800">
+                    {isMr 
+                      ? 'व्हाउचर नोंदवहीत खरेदी व्हाउचर आपोआप नोंद करा' 
+                      : 'Auto-create Purchase Voucher in Voucher Register'}
+                  </div>
+                  <div className="text-[11px] text-slate-600 mt-0.5">
+                    {isMr 
+                      ? 'हे निवडल्यास खरेदी व्हाउचर तयार होईल आणि ही सर्व औषधे थेट तुमच्या साठ्यात (Products) उपलब्ध होतील.' 
+                      : 'Creates a purchase inward voucher and automatically adds/updates items in your available stock.'}
+                  </div>
+                </div>
+              </label>
 
               {/* Import Mode Options */}
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">

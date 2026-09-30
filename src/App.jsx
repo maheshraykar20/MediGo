@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import MobileBottomNav from './components/MobileBottomNav';
@@ -24,7 +24,8 @@ import {
   apiSaveVoucher, 
   apiDeleteVoucher, 
   apiSaveProfile, 
-  apiSyncInventory 
+  apiSyncInventory,
+  apiCheckStoreSession
 } from './utils/apiService';
 
 import { 
@@ -130,41 +131,45 @@ export default function App() {
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
   const [editingVoucher, setEditingVoucher] = useState(null);
 
+  // Safety refs to strictly isolate data and prevent cross-user overwrite
+  const activeUserIdRef = useRef(currentUser?.id || null);
+  const isDataLoadedRef = useRef(Boolean(currentUser?.id));
+
   // Apply active color theme immediately across all UI components
   useEffect(() => {
     applyDashboardTheme(currentTheme);
   }, [currentTheme]);
 
-  // Synchronize isolated data to localStorage whenever it changes
+  // Synchronize isolated data only when loaded and belonging to this specific user
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && activeUserIdRef.current === currentUser.id && isDataLoadedRef.current) {
       saveUserInventory(currentUser.id, medicines);
     }
-  }, [medicines, currentUser]);
+  }, [medicines]);
 
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && activeUserIdRef.current === currentUser.id && isDataLoadedRef.current) {
       saveUserProfile(currentUser.id, storeProfile);
     }
-  }, [storeProfile, currentUser]);
+  }, [storeProfile]);
 
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && activeUserIdRef.current === currentUser.id && isDataLoadedRef.current) {
       saveUserVouchers(currentUser.id, vouchers);
     }
-  }, [vouchers, currentUser]);
+  }, [vouchers]);
 
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && activeUserIdRef.current === currentUser.id && isDataLoadedRef.current) {
       saveUserCategories(currentUser.id, customCategories);
     }
-  }, [customCategories, currentUser]);
+  }, [customCategories]);
 
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && activeUserIdRef.current === currentUser.id && isDataLoadedRef.current) {
       saveUserTheme(currentUser.id, currentTheme);
     }
-  }, [currentTheme, currentUser]);
+  }, [currentTheme]);
 
   useEffect(() => {
     localStorage.setItem(AUDIO_KEY, String(audioEnabled));
@@ -177,34 +182,94 @@ export default function App() {
   // Hydrate data from isolated SQLite DB on mount or user change
   useEffect(() => {
     if (currentUser?.id) {
+      isDataLoadedRef.current = false;
+      activeUserIdRef.current = currentUser.id;
+
       loadUserDataFromDatabase(currentUser.id).then((dbData) => {
         if (dbData) {
-          if (Array.isArray(dbData.medicines)) setMedicines(dbData.medicines);
-          if (Array.isArray(dbData.vouchers)) setVouchers(dbData.vouchers);
-          if (dbData.profile && (dbData.profile.storeName || dbData.profile.ownerName || dbData.profile.phone)) {
-            setStoreProfile(dbData.profile);
-          }
-          if (Array.isArray(dbData.categories) && dbData.categories.length > 0) {
-            setCustomCategories(dbData.categories);
-          }
+          setMedicines(Array.isArray(dbData.medicines) ? dbData.medicines : []);
+          setVouchers(Array.isArray(dbData.vouchers) ? dbData.vouchers : []);
+          setStoreProfile(dbData.profile || DEFAULT_PROFILE);
+          setCustomCategories(Array.isArray(dbData.categories) ? dbData.categories : []);
           if (dbData.theme) {
             setCurrentTheme(dbData.theme);
             applyDashboardTheme(dbData.theme);
           }
+        } else {
+          setMedicines(getUserInventory(currentUser.id));
+          setVouchers(getUserVouchers(currentUser.id));
+          setStoreProfile(getUserProfile(currentUser.id, DEFAULT_PROFILE));
+          setCustomCategories(getUserCategories(currentUser.id));
         }
+        isDataLoadedRef.current = true;
       }).catch((e) => {
         console.warn('SQLite load warning:', e);
+        isDataLoadedRef.current = true;
       });
+    } else {
+      isDataLoadedRef.current = false;
+      activeUserIdRef.current = null;
+      setMedicines([]);
+      setVouchers([]);
+      setStoreProfile(DEFAULT_PROFILE);
+      setCustomCategories([]);
     }
   }, [currentUser?.id]);
 
+  // Live Session Guard: If DB Admin deletes this store, immediately auto-logout!
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const status = await apiCheckStoreSession(currentUser.id);
+        if (status && status.isDeleted) {
+          clearInterval(interval);
+          logoutUser();
+          setCurrentUserState(null);
+          setMedicines([]);
+          setVouchers([]);
+          setStoreProfile(DEFAULT_PROFILE);
+          setCustomCategories([]);
+          activeUserIdRef.current = null;
+          isDataLoadedRef.current = false;
+          alert(
+            lang === 'mr'
+              ? 'सावधान: हे मेडिकल स्टोअर ॲडमिनद्वारे हटवण्यात आले आहे. तुमचा डॅशबोर्ड बंद करण्यात येत आहे.'
+              : 'Attention: This medical store account has been deleted by the administrator. You have been logged out.'
+          );
+        }
+      } catch (err) {
+        if (err.message && err.message.includes('STORE_DELETED')) {
+          clearInterval(interval);
+          logoutUser();
+          setCurrentUserState(null);
+          setMedicines([]);
+          setVouchers([]);
+          setStoreProfile(DEFAULT_PROFILE);
+          setCustomCategories([]);
+          activeUserIdRef.current = null;
+          isDataLoadedRef.current = false;
+          alert(
+            lang === 'mr'
+              ? 'सावधान: हे मेडिकल स्टोअर ॲडमिनद्वारे हटवण्यात आले आहे.'
+              : 'Attention: This medical store account has been deleted by the administrator.'
+          );
+        }
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [currentUser?.id, lang]);
+
   // Handle User Login Success (From full screen LoginScreen or LoginModal)
   const handleLoginSuccess = async (user) => {
+    isDataLoadedRef.current = false;
+    activeUserIdRef.current = user.id;
     setCurrentUserState(user);
     setIsLoginModalOpen(false);
 
     try {
-      // Try to load isolated records directly from per-user SQLite database
       const dbData = await loadUserDataFromDatabase(user.id);
       if (dbData) {
         setMedicines(Array.isArray(dbData.medicines) ? dbData.medicines : []);
@@ -215,6 +280,7 @@ export default function App() {
           setCurrentTheme(dbData.theme);
           applyDashboardTheme(dbData.theme);
         }
+        isDataLoadedRef.current = true;
         setActiveView('dashboard');
         return;
       }
@@ -222,7 +288,6 @@ export default function App() {
       console.warn('Fallback to local storage data:', err);
     }
 
-    // Fallback to localStorage isolated store
     const loadedMeds = getUserInventory(user.id);
     const loadedVouchers = getUserVouchers(user.id);
     const loadedProfile = getUserProfile(user.id, DEFAULT_PROFILE);
@@ -235,6 +300,7 @@ export default function App() {
     setCustomCategories(loadedCategories);
     setCurrentTheme(loadedTheme);
     applyDashboardTheme(loadedTheme);
+    isDataLoadedRef.current = true;
     setActiveView('dashboard');
   };
 
@@ -247,6 +313,12 @@ export default function App() {
   const handleConfirmLogout = () => {
     logoutUser();
     setCurrentUserState(null);
+    setMedicines([]);
+    setVouchers([]);
+    setStoreProfile(DEFAULT_PROFILE);
+    setCustomCategories([]);
+    activeUserIdRef.current = null;
+    isDataLoadedRef.current = false;
     setIsLoginModalOpen(false);
     setIsLogoutConfirmOpen(false);
   };
@@ -376,7 +448,7 @@ export default function App() {
     setIsDetailModalOpen(true);
   };
 
-  const handleImportComplete = (importedMeds, mode = 'append') => {
+  const handleImportComplete = (importedMeds, mode = 'append', invoiceMeta = null) => {
     let nextMeds = [];
     if (mode === 'replace') {
       nextMeds = importedMeds;
@@ -387,6 +459,39 @@ export default function App() {
     if (currentUser?.id) {
       apiSyncInventory(currentUser.id, nextMeds, true).catch(e => console.warn('SQLite excel import sync:', e));
     }
+
+    // Auto-create purchase voucher if invoiceMeta was detected or requested
+    if (invoiceMeta && importedMeds.length > 0) {
+      const purchaseVoucher = {
+        id: `vch-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        voucherType: 'PURCHASE',
+        voucherNo: invoiceMeta.invoiceNo || `PV-${Date.now().toString().slice(-6)}`,
+        date: invoiceMeta.invoiceDate || new Date().toISOString().split('T')[0],
+        partyName: invoiceMeta.supplierName || 'Distributor Purchase',
+        partyPhone: '',
+        invoiceRef: invoiceMeta.invoiceNo || '',
+        paymentMode: 'Bank / Credit',
+        paymentStatus: 'PAID',
+        notes: `Imported invoice (${importedMeds.length} items)`,
+        taxPercent: 12,
+        discount: 0,
+        updateStock: false, // Already added directly to inventory
+        items: importedMeds.map(m => ({
+          name: m.name,
+          batchNo: m.batchNo,
+          expiryDate: m.expiryDate,
+          quantity: m.stock,
+          unit: m.unit,
+          rate: m.purchasePrice,
+          mrp: m.mrp,
+          amount: +(m.stock * m.purchasePrice).toFixed(2),
+        })),
+        grandTotal: invoiceMeta.grandTotal || importedMeds.reduce((sum, m) => sum + (m.stock * m.purchasePrice), 0),
+        createdAt: new Date().toISOString(),
+      };
+      handleSaveVoucher(purchaseVoucher);
+    }
+
     setActiveView('medicines');
     setSelectedStatusFilter('all');
   };
@@ -672,6 +777,7 @@ export default function App() {
                 setEditingVoucher(null);
                 setIsVoucherModalOpen(true);
               }}
+              onOpenImportModal={() => setIsExcelModalOpen(true)}
               onEditVoucher={handleEditVoucher}
               onDeleteVoucher={handleDeleteVoucher}
               storeProfile={storeProfile}

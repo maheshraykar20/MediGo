@@ -17,7 +17,8 @@ import {
   Building2,
   Phone,
   Eye,
-  Download
+  Download,
+  UploadCloud
 } from 'lucide-react';
 import { formatINR } from '../utils/expiryUtils';
 import { generateVoucherPdf, exportVouchersToExcel, printVoucherHtml } from '../utils/voucherPdfUtils';
@@ -26,6 +27,7 @@ import { playSuccessSound } from '../utils/notificationSound';
 export default function VoucherView({ 
   vouchers = [], 
   onOpenNewVoucher, 
+  onOpenImportModal,
   onEditVoucher, 
   onDeleteVoucher, 
   storeProfile, 
@@ -183,7 +185,18 @@ export default function VoucherView({
           </div>
 
           {/* Action Buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            {onOpenImportModal && (
+              <button
+                onClick={onOpenImportModal}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition shrink-0"
+                title={isMr ? 'एक्सेल किंवा PDF बिल अपलोड करा' : 'Import Bill / Invoice (Excel or PDF)'}
+              >
+                <UploadCloud className="w-4 h-4 text-emerald-600" />
+                <span>{isMr ? '📄 बिल इम्पोर्ट (Excel/PDF)' : '📄 Import Bill (Excel/PDF)'}</span>
+              </button>
+            )}
+
             <button
               onClick={handleExportExcel}
               className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition shrink-0"

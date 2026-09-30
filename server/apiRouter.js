@@ -32,7 +32,8 @@ import {
   adminDeleteTenantVoucher,
   adminSaveTenantProfile,
   adminDeleteTenantStore,
-  getActiveStoresCount
+  getActiveStoresCount,
+  isStoreDeleted
 } from './dbService.js';
 
 // Helper to parse JSON body from incoming HTTP request
@@ -116,12 +117,30 @@ export async function handleApiRequest(req, res) {
     }
 
     // ---------------------------------------------------------
+    // STORE SESSION & DELETION STATUS (Auto-logout if deleted by admin)
+    // ---------------------------------------------------------
+    if (pathname === '/api/store/session-status' && req.method === 'GET') {
+      const userId = query.userId;
+      if (!userId) {
+        sendJson(res, 400, { error: 'userId is required' });
+        return true;
+      }
+      const deleted = isStoreDeleted(userId);
+      sendJson(res, 200, { success: true, valid: !deleted, isDeleted: deleted });
+      return true;
+    }
+
+    // ---------------------------------------------------------
     // PROFILE ROUTES
     // ---------------------------------------------------------
     if (pathname === '/api/store/profile' && req.method === 'GET') {
       const userId = query.userId;
       if (!userId) {
         sendJson(res, 400, { error: 'userId is required' });
+        return true;
+      }
+      if (isStoreDeleted(userId)) {
+        sendJson(res, 403, { error: 'STORE_DELETED', isDeleted: true, message: 'This store has been deleted by administrator' });
         return true;
       }
       const profile = getDbUserProfile(userId);
@@ -150,6 +169,10 @@ export async function handleApiRequest(req, res) {
         sendJson(res, 400, { error: 'userId is required' });
         return true;
       }
+      if (isStoreDeleted(userId)) {
+        sendJson(res, 403, { error: 'STORE_DELETED', isDeleted: true, message: 'This store has been deleted by administrator' });
+        return true;
+      }
       const medicines = getDbUserInventory(userId);
       sendJson(res, 200, { success: true, medicines, count: medicines.length });
       return true;
@@ -160,6 +183,10 @@ export async function handleApiRequest(req, res) {
       const userId = body.userId;
       if (!userId) {
         sendJson(res, 400, { error: 'userId is required' });
+        return true;
+      }
+      if (isStoreDeleted(userId)) {
+        sendJson(res, 403, { error: 'STORE_DELETED', isDeleted: true, message: 'This store has been deleted by administrator' });
         return true;
       }
       const result = syncDbAllMedicines(userId, body.medicines || [], body.isBulkExcelImport === true);

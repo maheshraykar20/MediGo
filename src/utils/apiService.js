@@ -39,6 +39,10 @@ export async function apiVerifyOtp(phone, code) {
   });
 }
 
+export async function apiCheckStoreSession(userId) {
+  return fetchJson(`/store/session-status?userId=${encodeURIComponent(userId)}`);
+}
+
 // -------------------------------------------------------------
 // STORE PROFILE
 // -------------------------------------------------------------

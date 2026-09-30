@@ -889,15 +889,144 @@ export function saveDbUserSetting(userId, key, value) {
 }
 
 // -------------------------------------------------------------
-// 9. COMPLETE STORE RESET (Wipes inventory & vouchers in DB)
+// 9. COMPLETE STORE RESET (Preserves data in DB Admin Archive!)
 // -------------------------------------------------------------
+export function isStoreDeleted(userId) {
+  const cleanPhone = (userId || '').replace(/[^0-9]/g, '').slice(-10);
+  if (!cleanPhone || cleanPhone.length !== 10) return false;
+  try {
+    const central = getCentralDb();
+    const row = central.prepare(`SELECT phone FROM deleted_stores WHERE phone = ?`).get(cleanPhone);
+    return Boolean(row);
+  } catch {
+    return false;
+  }
+}
+
 export function resetDbUserData(userId) {
   const db = getUserDatabase(userId);
+  const cleanPhone = (userId || '').replace(/[^0-9]/g, '').slice(-10);
+  const now = new Date().toISOString();
+
+  // Create archived tables if not already present
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS archived_medicines (
+      id TEXT,
+      name TEXT,
+      composition TEXT,
+      category TEXT,
+      batch_no TEXT,
+      expiry_date TEXT,
+      stock INTEGER,
+      unit TEXT,
+      purchase_price REAL,
+      mrp REAL,
+      rack TEXT,
+      manufacturer TEXT,
+      schedule TEXT,
+      min_stock INTEGER,
+      distributor TEXT,
+      status TEXT,
+      archived_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS archived_vouchers (
+      id TEXT,
+      voucher_type TEXT,
+      voucher_no TEXT,
+      date TEXT,
+      party_name TEXT,
+      party_phone TEXT,
+      invoice_ref TEXT,
+      grand_total REAL,
+      payment_mode TEXT,
+      payment_status TEXT,
+      items_json TEXT,
+      archived_at TEXT
+    );
+  `);
+
+  // 1. Fetch current rows
+  let medRows = [];
+  let vchRows = [];
+  try {
+    medRows = db.prepare(`SELECT * FROM medicines`).all();
+    vchRows = db.prepare(`SELECT * FROM vouchers`).all();
+  } catch (e) {
+    console.warn('Error reading data for archiving on reset:', e);
+  }
+
+  // 2. Insert into archives with timestamp
+  if (medRows.length > 0) {
+    const insertArchMed = db.prepare(`
+      INSERT INTO archived_medicines 
+      (id, name, composition, category, batch_no, expiry_date, stock, unit, purchase_price, mrp, rack, manufacturer, schedule, min_stock, distributor, status, archived_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const m of medRows) {
+      insertArchMed.run(
+        m.id, m.name, m.composition, m.category, m.batch_no, m.expiry_date, 
+        m.stock, m.unit, m.purchase_price, m.mrp, m.rack, m.manufacturer, 
+        m.schedule, m.min_stock, m.distributor, m.status, now
+      );
+    }
+  }
+
+  if (vchRows.length > 0) {
+    const insertArchVch = db.prepare(`
+      INSERT INTO archived_vouchers
+      (id, voucher_type, voucher_no, date, party_name, party_phone, invoice_ref, grand_total, payment_mode, payment_status, items_json, archived_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const v of vchRows) {
+      insertArchVch.run(
+        v.id, v.voucher_type, v.voucher_no, v.date, v.party_name, v.party_phone, 
+        v.invoice_ref, v.grand_total, v.payment_mode, v.payment_status, v.items_json, now
+      );
+    }
+  }
+
+  // 3. Clear only active working tables for the user
   db.exec(`
     DELETE FROM medicines;
     DELETE FROM vouchers;
   `);
-  return { success: true };
+
+  // 4. Record audit log and notification for Super Admin
+  try {
+    db.prepare(`
+      INSERT INTO database_audit_logs (action, entity, details, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run('USER_RESET', 'store_data', JSON.stringify({ archivedMedicines: medRows.length, archivedVouchers: vchRows.length }), now);
+
+    const central = getCentralDb();
+    const profRow = db.prepare(`SELECT store_name, owner_name FROM store_profile WHERE id = 1`).get();
+    const storeTitle = profRow?.store_name || `Medical Store (${cleanPhone.slice(-4)})`;
+    const ownerTitle = profRow?.owner_name || 'Pharmacist';
+
+    central.prepare(`
+      INSERT INTO admin_notifications (user_id, user_phone, user_name, store_name, action_type, title, description, details, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      userId,
+      cleanPhone,
+      ownerTitle,
+      storeTitle,
+      'USER_RESET_PRESERVED',
+      'User Reset Store Data (Backup Preserved in Admin)',
+      `Store user reset their data. ${medRows.length} medicines and ${vchRows.length} vouchers safely preserved in DB Admin archive.`,
+      JSON.stringify({ archivedMedicines: medRows.length, archivedVouchers: vchRows.length }),
+      now
+    );
+  } catch (err) {
+    console.warn('Audit log / notification write error on reset:', err);
+  }
+
+  return { 
+    success: true, 
+    archivedMedicines: medRows.length, 
+    archivedVouchers: vchRows.length 
+  };
 }
 
 // -------------------------------------------------------------
@@ -1073,6 +1202,35 @@ export function getAdminTenantFullData(userId) {
     console.warn('Could not read audit logs for tenant:', err);
   }
 
+  let archivedMedicines = [];
+  let archivedVouchers = [];
+  try {
+    archivedMedicines = db.prepare(`SELECT * FROM archived_medicines ORDER BY archived_at DESC LIMIT 500`).all().map(r => ({
+      ...r,
+      batchNo: r.batch_no,
+      expiryDate: r.expiry_date,
+      purchasePrice: r.purchase_price,
+      minStock: r.min_stock,
+      archivedAt: r.archived_at
+    }));
+  } catch {}
+
+  try {
+    archivedVouchers = db.prepare(`SELECT * FROM archived_vouchers ORDER BY archived_at DESC LIMIT 500`).all().map(r => ({
+      ...r,
+      voucherType: r.voucher_type,
+      voucherNo: r.voucher_no,
+      partyName: r.party_name,
+      partyPhone: r.party_phone,
+      invoiceRef: r.invoice_ref,
+      grandTotal: r.grand_total,
+      paymentMode: r.payment_mode,
+      paymentStatus: r.payment_status,
+      items: r.items_json ? JSON.parse(r.items_json) : [],
+      archivedAt: r.archived_at
+    }));
+  } catch {}
+
   return {
     success: true,
     user,
@@ -1080,6 +1238,8 @@ export function getAdminTenantFullData(userId) {
     medicines,
     vouchers,
     categories,
+    archivedMedicines,
+    archivedVouchers,
     auditLogs
   };
 }
