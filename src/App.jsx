@@ -184,11 +184,16 @@ export default function App() {
       isDataLoadedRef.current = false;
       activeUserIdRef.current = currentUser.id;
 
-      // Ensure fresh slate while loading this user's data
-      setMedicines([]);
-      setVouchers([]);
-      setStoreProfile(DEFAULT_PROFILE);
-      setCustomCategories([]);
+      // Immediately hydrate cached data so user never experiences blank flicker or missing data
+      const cachedMeds = getUserInventory(currentUser.id);
+      const cachedVchs = getUserVouchers(currentUser.id);
+      const cachedProf = getUserProfile(currentUser.id, DEFAULT_PROFILE);
+      const cachedCats = getUserCategories(currentUser.id);
+
+      if (cachedMeds && cachedMeds.length > 0) setMedicines(cachedMeds);
+      if (cachedVchs && cachedVchs.length > 0) setVouchers(cachedVchs);
+      if (cachedProf?.storeName) setStoreProfile(cachedProf);
+      if (cachedCats && cachedCats.length > 0) setCustomCategories(cachedCats);
 
       loadUserDataFromDatabase(currentUser.id).then((dbData) => {
         if (activeUserIdRef.current !== currentUser.id) return; // Prevent race conditions if user switched
@@ -200,21 +205,23 @@ export default function App() {
           const loadedVchs = Array.isArray(dbData.vouchers)
             ? dbData.vouchers.map(v => ({ ...v, userId: currentUser.id }))
             : [];
-          setMedicines(loadedMeds);
-          setVouchers(loadedVchs);
-          setStoreProfile(dbData.profile || DEFAULT_PROFILE);
-          setCustomCategories(Array.isArray(dbData.categories) ? dbData.categories : []);
+
+          if (loadedMeds.length > 0 || !cachedMeds || cachedMeds.length === 0) {
+            setMedicines(loadedMeds);
+          }
+          if (loadedVchs.length > 0 || !cachedVchs || cachedVchs.length === 0) {
+            setVouchers(loadedVchs);
+          }
+          if (dbData.profile?.storeName || !cachedProf?.storeName) {
+            setStoreProfile(dbData.profile || DEFAULT_PROFILE);
+          }
+          if (Array.isArray(dbData.categories) && dbData.categories.length > 0) {
+            setCustomCategories(dbData.categories);
+          }
           if (dbData.theme) {
             setCurrentTheme(dbData.theme);
             applyDashboardTheme(dbData.theme);
           }
-        } else {
-          const loadedMeds = getUserInventory(currentUser.id).map(m => ({ ...m, userId: currentUser.id }));
-          const loadedVchs = getUserVouchers(currentUser.id).map(v => ({ ...v, userId: currentUser.id }));
-          setMedicines(loadedMeds);
-          setVouchers(loadedVchs);
-          setStoreProfile(getUserProfile(currentUser.id, DEFAULT_PROFILE));
-          setCustomCategories(getUserCategories(currentUser.id));
         }
         isDataLoadedRef.current = true;
       }).catch((e) => {

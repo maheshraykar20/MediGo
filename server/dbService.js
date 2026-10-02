@@ -448,15 +448,15 @@ export function saveDbUserProfile(userId, profile, isExplicit = false) {
     INSERT INTO store_profile (id, store_name, owner_name, drug_license_20b, drug_license_21b, gstin, phone, email, address, logo_url, updated_at)
     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
-      store_name = excluded.store_name,
-      owner_name = excluded.owner_name,
-      drug_license_20b = excluded.drug_license_20b,
-      drug_license_21b = excluded.drug_license_21b,
-      gstin = excluded.gstin,
+      store_name = CASE WHEN excluded.store_name != '' THEN excluded.store_name ELSE store_profile.store_name END,
+      owner_name = CASE WHEN excluded.owner_name != '' THEN excluded.owner_name ELSE store_profile.owner_name END,
+      drug_license_20b = CASE WHEN excluded.drug_license_20b != '' THEN excluded.drug_license_20b ELSE store_profile.drug_license_20b END,
+      drug_license_21b = CASE WHEN excluded.drug_license_21b != '' THEN excluded.drug_license_21b ELSE store_profile.drug_license_21b END,
+      gstin = CASE WHEN excluded.gstin != '' THEN excluded.gstin ELSE store_profile.gstin END,
       phone = excluded.phone,
-      email = excluded.email,
-      address = excluded.address,
-      logo_url = excluded.logo_url,
+      email = CASE WHEN excluded.email != '' THEN excluded.email ELSE store_profile.email END,
+      address = CASE WHEN excluded.address != '' THEN excluded.address ELSE store_profile.address END,
+      logo_url = CASE WHEN excluded.logo_url != '' THEN excluded.logo_url ELSE store_profile.logo_url END,
       updated_at = excluded.updated_at;
   `).run(
     profile.storeName || '',
@@ -474,8 +474,8 @@ export function saveDbUserProfile(userId, profile, isExplicit = false) {
   // Also update central registry store name if available
   if (profile.storeName) {
     const central = getCentralDb();
-    central.prepare(`UPDATE users SET store_name = ?, name = ? WHERE phone = ?`)
-      .run(profile.storeName, profile.ownerName || 'Pharmacist', cleanPhone);
+    central.prepare(`UPDATE users SET store_name = ?, name = CASE WHEN ? != '' THEN ? ELSE name END WHERE phone = ?`)
+      .run(profile.storeName, profile.ownerName || '', profile.ownerName || '', cleanPhone);
   }
 
   // Only notify Super Admin if user explicitly saved their profile with real details
@@ -601,6 +601,17 @@ export function saveDbUserMedicine(userId, med) {
 export function syncDbAllMedicines(userId, medicinesList, isBulkExcelImport = false) {
   const db = getUserDatabase(userId);
   const now = new Date().toISOString();
+
+  // SAFETY GUARD: Never wipe database if medicinesList is empty or missing!
+  // Only explicit user data reset (resetDbUserData) or explicit deletion can clear data.
+  if (!medicinesList || !Array.isArray(medicinesList) || medicinesList.length === 0) {
+    let existingCount = 0;
+    try {
+      const row = db.prepare('SELECT COUNT(*) as count FROM medicines').get();
+      existingCount = row ? row.count : 0;
+    } catch {}
+    return { success: true, count: existingCount, preserved: true };
+  }
 
   db.exec('BEGIN TRANSACTION;');
   try {
@@ -775,6 +786,16 @@ export function saveDbUserVoucher(userId, voucher) {
 export function syncDbAllVouchers(userId, vouchersList) {
   const db = getUserDatabase(userId);
   const now = new Date().toISOString();
+
+  // SAFETY GUARD: Never wipe vouchers if vouchersList is empty or missing!
+  if (!vouchersList || !Array.isArray(vouchersList) || vouchersList.length === 0) {
+    let existingCount = 0;
+    try {
+      const row = db.prepare('SELECT COUNT(*) as count FROM vouchers').get();
+      existingCount = row ? row.count : 0;
+    } catch {}
+    return { success: true, count: existingCount, preserved: true };
+  }
 
   db.exec('BEGIN TRANSACTION;');
   try {

@@ -39,8 +39,60 @@ export default function LoginScreen({ onLoginSuccess, lang = 'en', setLang }) {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [resendCountdown, setResendCountdown] = useState(30);
+  const [recognizedStore, setRecognizedStore] = useState(false);
 
   const otpInputRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
+
+  // Auto-detect and prefill storeName when 10-digit phone number is entered
+  useEffect(() => {
+    const clean = phoneNumber.replace(/[^0-9]/g, '').slice(-10);
+    if (clean.length === 10) {
+      // 1. Check local profile
+      try {
+        const localProfRaw = localStorage.getItem(`medvault_profile_usr_${clean}`);
+        if (localProfRaw) {
+          const prof = JSON.parse(localProfRaw);
+          if (prof?.storeName && prof.storeName.trim()) {
+            if (!storeName || storeName !== prof.storeName.trim()) {
+              setStoreName(prof.storeName.trim());
+            }
+            if (prof.ownerName && !pharmacistName) setPharmacistName(prof.ownerName.trim());
+            setRecognizedStore(true);
+            return;
+          }
+        }
+      } catch {}
+
+      // 2. Check local user registry
+      try {
+        const regRaw = localStorage.getItem('medvault_users_registry');
+        if (regRaw) {
+          const reg = JSON.parse(regRaw);
+          if (reg[clean]?.storeName && reg[clean].storeName.trim()) {
+            if (!storeName || storeName !== reg[clean].storeName.trim()) {
+              setStoreName(reg[clean].storeName.trim());
+            }
+            if (reg[clean].name && !pharmacistName) setPharmacistName(reg[clean].name.trim());
+            setRecognizedStore(true);
+            return;
+          }
+        }
+      } catch {}
+
+      // 3. Query server profile
+      import('../utils/apiService').then(({ apiGetProfile }) => {
+        apiGetProfile(`usr_${clean}`).then(res => {
+          if (res?.success && res.profile?.storeName) {
+            if (!storeName) setStoreName(res.profile.storeName.trim());
+            if (res.profile.ownerName && !pharmacistName) setPharmacistName(res.profile.ownerName.trim());
+            setRecognizedStore(true);
+          }
+        }).catch(() => {});
+      }).catch(() => {});
+    } else {
+      setRecognizedStore(false);
+    }
+  }, [phoneNumber]);
 
   // Fetch and poll real dynamic count of active registered stores
   useEffect(() => {
@@ -426,6 +478,12 @@ export default function LoginScreen({ onLoginSuccess, lang = 'en', setLang }) {
                           </button>
                         )}
                       </div>
+                      {recognizedStore && (
+                        <p className="text-[11px] text-emerald-600 font-bold mt-1.5 flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>{isMr ? 'नोंदणीकृत स्टोअर ओळखले गेले! तुमचा सर्व डेटा सुरक्षित आहे.' : 'Registered store recognized! All previous inventory & data is safe.'}</span>
+                        </p>
+                      )}
                     </div>
 
                     {/* 2. MOBILE NUMBER */}

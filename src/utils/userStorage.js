@@ -77,19 +77,37 @@ export function requestPhoneOTP(phone, customName = '', customStoreName = '') {
   const otpCode = Math.floor(1000 + Math.random() * 9000).toString();
   const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes validity
 
+  let resolvedStore = customStoreName.trim();
+  let resolvedOwner = customName.trim();
+
+  if (!resolvedStore) {
+    try {
+      const reg = JSON.parse(localStorage.getItem(USERS_REGISTRY_KEY) || '{}');
+      if (reg[cleanPhone]?.storeName) resolvedStore = reg[cleanPhone].storeName;
+      if (reg[cleanPhone]?.name && !resolvedOwner) resolvedOwner = reg[cleanPhone].name;
+    } catch {}
+    if (!resolvedStore) {
+      try {
+        const prof = JSON.parse(localStorage.getItem(`medvault_profile_usr_${cleanPhone}`) || '{}');
+        if (prof?.storeName) resolvedStore = prof.storeName;
+        if (prof?.ownerName && !resolvedOwner) resolvedOwner = prof.ownerName;
+      } catch {}
+    }
+  }
+
   const otpPayload = {
     phone: cleanPhone,
     code: otpCode,
     expiresAt,
-    customName: customName.trim(),
-    customStoreName: customStoreName.trim(),
+    customName: resolvedOwner,
+    customStoreName: resolvedStore,
     generatedAt: new Date().toLocaleTimeString(),
   };
 
   try {
     sessionStorage.setItem(`${OTP_STORE_KEY}_${cleanPhone}`, JSON.stringify(otpPayload));
     // Sync OTP to central SQLite database with the exact code
-    api.apiRequestOtp(cleanPhone, customName, customStoreName, otpCode).catch(e => console.warn('SQLite OTP sync:', e));
+    api.apiRequestOtp(cleanPhone, resolvedOwner, resolvedStore, otpCode).catch(e => console.warn('SQLite OTP sync:', e));
   } catch (e) {
     console.error('Error saving OTP payload:', e);
   }
@@ -226,7 +244,10 @@ export function saveUserInventory(userId, inventory) {
   try {
     localStorage.setItem(key, JSON.stringify(inventory));
     // Persist to user's dedicated SQLite database!
-    api.apiSyncInventory(userId, inventory).catch(e => console.warn('SQLite inventory sync:', e));
+    // SAFETY GUARD: Only sync array if non-empty to prevent accidental wipes
+    if (Array.isArray(inventory) && inventory.length > 0) {
+      api.apiSyncInventory(userId, inventory).catch(e => console.warn('SQLite inventory sync:', e));
+    }
   } catch (e) {
     console.error('Failed to save user inventory:', e);
   }
@@ -256,7 +277,10 @@ export function saveUserVouchers(userId, vouchers) {
   try {
     localStorage.setItem(key, JSON.stringify(vouchers));
     // Persist to user's dedicated SQLite database!
-    api.apiSyncVouchers(userId, vouchers).catch(e => console.warn('SQLite vouchers sync:', e));
+    // SAFETY GUARD: Only sync array if non-empty to prevent accidental wipes
+    if (Array.isArray(vouchers) && vouchers.length > 0) {
+      api.apiSyncVouchers(userId, vouchers).catch(e => console.warn('SQLite vouchers sync:', e));
+    }
   } catch (e) {
     console.error('Failed to save user vouchers:', e);
   }
@@ -276,8 +300,8 @@ export function clearUserAllData(userId) {
 }
 
 export function getUserProfile(userId, fallback) {
-  if (!userId) return fallback;
-  const cleanPhone = (userId || '').replace('usr_', '');
+  if (!userId) return fallback || null;
+  const cleanPhone = (userId || '').replace(/[^0-9]/g, '').slice(-10);
   const key = `medvault_profile_${userId}`;
   try {
     const raw = localStorage.getItem(key);
@@ -308,26 +332,34 @@ export function getUserProfile(userId, fallback) {
     console.error('Failed to load user profile:', e);
   }
 
-  // Fresh user profile: 100% blank slate so the user manually fills everything,
-  // with only the verified login phone number populated.
-  const blankProfile = {
-    storeName: '',
-    ownerName: '',
-    drugLicense20B: '',
-    drugLicense21B: '',
-    gstin: '',
+  // Look up user from registry to see if storeName was entered at registration
+  let regStoreName = '';
+  let regOwnerName = '';
+  try {
+    const reg = JSON.parse(localStorage.getItem(USERS_REGISTRY_KEY) || '{}');
+    if (reg[cleanPhone]) {
+      regStoreName = reg[cleanPhone].storeName || '';
+      regOwnerName = reg[cleanPhone].name || '';
+    }
+  } catch {}
+
+  const profile = {
+    storeName: regStoreName || fallback?.storeName || '',
+    ownerName: regOwnerName || fallback?.ownerName || '',
+    drugLicense20B: fallback?.drugLicense20B || '',
+    drugLicense21B: fallback?.drugLicense21B || '',
+    gstin: fallback?.gstin || '',
     phone: cleanPhone,
-    email: '',
-    address: '',
-    logoUrl: '',
+    email: fallback?.email || '',
+    address: fallback?.address || '',
+    logoUrl: fallback?.logoUrl || '',
   };
 
-  saveUserProfile(userId, blankProfile);
-  return blankProfile;
+  return profile;
 }
 
 export function saveUserProfile(userId, profile) {
-  if (!userId) return;
+  if (!userId || !profile) return;
   const key = `medvault_profile_${userId}`;
   try {
     localStorage.setItem(key, JSON.stringify(profile));
@@ -408,9 +440,11 @@ export function saveUserTheme(userId, theme) {
   }
 }
 
-// Load and hydrate user's data from their dedicated SQLite database file
+// Load and hydrate user's data from their dedicated SQLite database file (Self-Healing Dual-Sync)
 export async function loadUserDataFromDatabase(userId) {
   if (!userId) return null;
+  const cleanPhone = (userId || '').replace(/[^0-9]/g, '').slice(-10);
+
   try {
     const [invRes, vchRes, profRes, catRes, themeRes] = await Promise.allSettled([
       api.apiGetInventory(userId),
@@ -421,41 +455,149 @@ export async function loadUserDataFromDatabase(userId) {
     ]);
 
     const result = {};
-    if (invRes.status === 'fulfilled' && invRes.value?.medicines) {
-      const taggedMeds = invRes.value.medicines.map(m => ({ ...m, userId }));
+
+    // 1. INVENTORY (Self-Healing Dual-Sync)
+    const localMeds = getUserInventory(userId);
+    const serverMeds = (invRes.status === 'fulfilled' && Array.isArray(invRes.value?.medicines))
+      ? invRes.value.medicines
+      : null;
+
+    if (serverMeds && serverMeds.length > 0) {
+      // Server SQLite has data -> authoritative source
+      const taggedMeds = serverMeds.map(m => ({ ...m, userId }));
       try {
         localStorage.setItem(`medvault_inventory_${userId}`, JSON.stringify(taggedMeds));
       } catch {}
       result.medicines = taggedMeds;
+    } else if (localMeds && localMeds.length > 0) {
+      // Local cache has data, but server SQLite is empty (e.g. server restarted or container reset)
+      // SELF-HEALING: Never wipe user's local inventory! Restore directly into server SQLite.
+      const taggedMeds = localMeds.map(m => ({ ...m, userId }));
+      result.medicines = taggedMeds;
+      api.apiSyncInventory(userId, taggedMeds, false).catch(e => console.warn('SQLite auto-restore medicines:', e));
+    } else {
+      result.medicines = [];
     }
-    if (vchRes.status === 'fulfilled' && vchRes.value?.vouchers) {
-      const taggedVchs = vchRes.value.vouchers.map(v => ({ ...v, userId }));
+
+    // 2. VOUCHERS (Self-Healing Dual-Sync)
+    const localVchs = getUserVouchers(userId);
+    const serverVchs = (vchRes.status === 'fulfilled' && Array.isArray(vchRes.value?.vouchers))
+      ? vchRes.value.vouchers
+      : null;
+
+    if (serverVchs && serverVchs.length > 0) {
+      const taggedVchs = serverVchs.map(v => ({ ...v, userId }));
       try {
         localStorage.setItem(`medvault_vouchers_${userId}`, JSON.stringify(taggedVchs));
       } catch {}
       result.vouchers = taggedVchs;
+    } else if (localVchs && localVchs.length > 0) {
+      // Server SQLite empty, restore from client cache
+      const taggedVchs = localVchs.map(v => ({ ...v, userId }));
+      result.vouchers = taggedVchs;
+      api.apiSyncVouchers(userId, taggedVchs).catch(e => console.warn('SQLite auto-restore vouchers:', e));
+    } else {
+      result.vouchers = [];
     }
-    if (profRes.status === 'fulfilled' && profRes.value?.profile) {
+
+    // 3. STORE PROFILE (Self-Healing & Merge)
+    const localProf = getUserProfile(userId, null);
+    const serverProf = (profRes.status === 'fulfilled' && profRes.value?.profile)
+      ? profRes.value.profile
+      : null;
+
+    // Check registry for any saved store name or owner name
+    let registryStoreName = '';
+    let registryOwnerName = '';
+    try {
+      const reg = JSON.parse(localStorage.getItem(USERS_REGISTRY_KEY) || '{}');
+      if (reg[cleanPhone]) {
+        registryStoreName = reg[cleanPhone].storeName || '';
+        registryOwnerName = reg[cleanPhone].name || '';
+      }
+    } catch {}
+
+    const resolvedStoreName = (serverProf?.storeName && serverProf.storeName.trim()) 
+      || (localProf?.storeName && localProf.storeName.trim()) 
+      || registryStoreName 
+      || '';
+
+    const resolvedOwnerName = (serverProf?.ownerName && serverProf.ownerName.trim()) 
+      || (localProf?.ownerName && localProf.ownerName.trim()) 
+      || registryOwnerName 
+      || '';
+
+    const mergedProfile = {
+      storeName: resolvedStoreName,
+      ownerName: resolvedOwnerName,
+      drugLicense20B: serverProf?.drugLicense20B || localProf?.drugLicense20B || '',
+      drugLicense21B: serverProf?.drugLicense21B || localProf?.drugLicense21B || '',
+      gstin: serverProf?.gstin || localProf?.gstin || '',
+      phone: cleanPhone,
+      email: serverProf?.email || localProf?.email || '',
+      address: serverProf?.address || localProf?.address || '',
+      logoUrl: serverProf?.logoUrl || localProf?.logoUrl || '',
+    };
+
+    if (mergedProfile.storeName || mergedProfile.phone) {
       try {
-        localStorage.setItem(`medvault_profile_${userId}`, JSON.stringify(profRes.value.profile));
+        localStorage.setItem(`medvault_profile_${userId}`, JSON.stringify(mergedProfile));
       } catch {}
-      result.profile = profRes.value.profile;
+      result.profile = mergedProfile;
+
+      // If server was missing storeName or details, re-sync to SQLite
+      if (!serverProf?.storeName && mergedProfile.storeName) {
+        api.apiSaveProfile(userId, mergedProfile).catch(e => console.warn('SQLite auto-restore profile:', e));
+      }
+    } else {
+      result.profile = mergedProfile;
     }
-    if (catRes.status === 'fulfilled' && catRes.value?.categories) {
+
+    // 4. CATEGORIES (Self-Healing)
+    const localCats = getUserCategories(userId);
+    const serverCats = (catRes.status === 'fulfilled' && Array.isArray(catRes.value?.categories))
+      ? catRes.value.categories
+      : null;
+
+    if (serverCats && serverCats.length > 0) {
+      const combined = Array.from(new Set([...serverCats, ...(localCats || [])]));
       try {
-        localStorage.setItem(`medvault_categories_${userId}`, JSON.stringify(catRes.value.categories));
+        localStorage.setItem(`medvault_categories_${userId}`, JSON.stringify(combined));
       } catch {}
-      result.categories = catRes.value.categories;
+      result.categories = combined;
+    } else if (localCats && localCats.length > 0) {
+      result.categories = localCats;
+      localCats.forEach(c => api.apiAddCategory(userId, c).catch(() => {}));
+    } else {
+      result.categories = [];
     }
-    if (themeRes.status === 'fulfilled' && themeRes.value?.theme) {
+
+    // 5. THEME (Self-Healing)
+    const localTheme = getUserTheme(userId);
+    const serverTheme = (themeRes.status === 'fulfilled' && themeRes.value?.theme)
+      ? themeRes.value.theme
+      : null;
+
+    if (serverTheme) {
       try {
-        localStorage.setItem(`medvault_theme_${userId}`, JSON.stringify(themeRes.value.theme));
+        localStorage.setItem(`medvault_theme_${userId}`, JSON.stringify(serverTheme));
       } catch {}
-      result.theme = themeRes.value.theme;
+      result.theme = serverTheme;
+    } else if (localTheme) {
+      result.theme = localTheme;
+      api.apiSaveTheme(userId, localTheme).catch(() => {});
     }
+
     return result;
   } catch (e) {
     console.warn('Could not load user data from database:', e);
-    return null;
+    // Safe fallback to local cache on error so user never sees empty screen
+    return {
+      medicines: getUserInventory(userId),
+      vouchers: getUserVouchers(userId),
+      profile: getUserProfile(userId, null),
+      categories: getUserCategories(userId),
+      theme: getUserTheme(userId),
+    };
   }
 }
