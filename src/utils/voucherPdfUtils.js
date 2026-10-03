@@ -86,10 +86,12 @@ export function generateVoucherPdf(voucher, storeProfile = {}, lang = 'en') {
   doc.setFont('helvetica', 'normal');
   doc.text(`${voucher.partyName || 'General Cash Counter'}`, 140, 47);
 
+  const paymentMode = (!voucher.paymentMode || voucher.paymentMode === 'Bank / Credit') ? 'Cash / Credit' : voucher.paymentMode;
+
   doc.setFont('helvetica', 'bold');
   doc.text(`Payment Mode:`, 110, 54);
   doc.setFont('helvetica', 'normal');
-  doc.text(`${voucher.paymentMode || 'Cash'}`, 140, 54);
+  doc.text(`${paymentMode}`, 140, 54);
 
   doc.setFont('helvetica', 'bold');
   doc.text(`Status:`, 110, 61);
@@ -104,7 +106,7 @@ export function generateVoucherPdf(voucher, storeProfile = {}, lang = 'en') {
     item.expiryDate || '-',
     `${item.quantity || 1} ${item.unit || 'Strips'}`,
     `Rs. ${Number(item.rate || 0).toFixed(2)}`,
-    `Rs. ${Number(item.amount || ((item.quantity || 1) * (item.rate || 0))).toFixed(2)}`
+    `Rs. ${Number(item.amount || ((parseFloat(item.quantity) || 1) * (parseFloat(item.rate) || 0))).toFixed(2)}`
   ]);
 
   autoTable(doc, {
@@ -137,6 +139,33 @@ export function generateVoucherPdf(voucher, storeProfile = {}, lang = 'en') {
   // Calculate totals block position
   const finalY = doc.lastAutoTable.finalY + 6;
 
+  // Accurate Financial Calculations from items if missing or zero
+  const itemsCalculatedSum = (voucher.items || []).reduce((sum, item) => {
+    const q = parseFloat(item.quantity) || 1;
+    const r = parseFloat(item.rate) || 0;
+    const a = parseFloat(item.amount) || (q * r);
+    return sum + a;
+  }, 0);
+
+  const subtotal = (parseFloat(voucher.subtotal) > 0)
+    ? parseFloat(voucher.subtotal)
+    : (parseFloat(voucher.totalAmount) > 0)
+      ? parseFloat(voucher.totalAmount)
+      : +itemsCalculatedSum.toFixed(2);
+
+  const taxPercent = parseFloat(voucher.taxPercent) || 0;
+  const taxAmount = (parseFloat(voucher.taxAmount) > 0)
+    ? parseFloat(voucher.taxAmount)
+    : +(subtotal * (taxPercent / 100)).toFixed(2);
+
+  const discount = parseFloat(voucher.discount) || 0;
+
+  const grandTotal = (parseFloat(voucher.grandTotal) > 0)
+    ? parseFloat(voucher.grandTotal)
+    : (parseFloat(voucher.netAmount) > 0)
+      ? parseFloat(voucher.netAmount)
+      : +(subtotal + taxAmount - discount).toFixed(2);
+
   // Totals Box on Right
   doc.setFillColor(248, 250, 252);
   doc.rect(120, finalY, 76, 32, 'F');
@@ -146,13 +175,13 @@ export function generateVoucherPdf(voucher, storeProfile = {}, lang = 'en') {
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
   doc.text(`Subtotal:`, 124, finalY + 6);
-  doc.text(`Rs. ${Number(voucher.subtotal || 0).toFixed(2)}`, 192, finalY + 6, { align: 'right' });
+  doc.text(`Rs. ${subtotal.toFixed(2)}`, 192, finalY + 6, { align: 'right' });
 
-  doc.text(`GST Tax (${voucher.taxPercent || 0}%):`, 124, finalY + 12);
-  doc.text(`Rs. ${Number(voucher.taxAmount || 0).toFixed(2)}`, 192, finalY + 12, { align: 'right' });
+  doc.text(`GST Tax (${taxPercent}%):`, 124, finalY + 12);
+  doc.text(`Rs. ${taxAmount.toFixed(2)}`, 192, finalY + 12, { align: 'right' });
 
   doc.text(`Discount:`, 124, finalY + 18);
-  doc.text(`Rs. ${Number(voucher.discount || 0).toFixed(2)}`, 192, finalY + 18, { align: 'right' });
+  doc.text(`Rs. ${discount.toFixed(2)}`, 192, finalY + 18, { align: 'right' });
 
   doc.setDrawColor(13, 148, 136);
   doc.line(122, finalY + 21, 194, finalY + 21);
@@ -161,7 +190,7 @@ export function generateVoucherPdf(voucher, storeProfile = {}, lang = 'en') {
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(13, 148, 136);
   doc.text(`Grand Total:`, 124, finalY + 28);
-  doc.text(`Rs. ${Number(voucher.grandTotal || 0).toFixed(2)}`, 192, finalY + 28, { align: 'right' });
+  doc.text(`Rs. ${grandTotal.toFixed(2)}`, 192, finalY + 28, { align: 'right' });
 
   // Notes on Left
   doc.setTextColor(71, 85, 105);
@@ -196,6 +225,12 @@ export function exportVouchersToExcel(vouchers, filename = 'Pharmacy_Vouchers_Re
   const exportData = vouchers.map((v, index) => {
     const itemsCount = v.items?.length || 0;
     const itemsNames = (v.items || []).map(i => `${i.name} (${i.quantity} ${i.unit || 'Strips'})`).join('; ');
+    const itemsSum = (v.items || []).reduce((sum, item) => sum + (parseFloat(item.amount) || ((parseFloat(item.quantity) || 1) * (parseFloat(item.rate) || 0))), 0);
+    const subtotal = (parseFloat(v.subtotal) > 0) ? parseFloat(v.subtotal) : (parseFloat(v.totalAmount) > 0) ? parseFloat(v.totalAmount) : +itemsSum.toFixed(2);
+    const taxAmt = parseFloat(v.taxAmount) || 0;
+    const disc = parseFloat(v.discount) || 0;
+    const grandTotal = (parseFloat(v.grandTotal) > 0) ? parseFloat(v.grandTotal) : (parseFloat(v.netAmount) > 0) ? parseFloat(v.netAmount) : +(subtotal + taxAmt - disc).toFixed(2);
+    const payMode = (!v.paymentMode || v.paymentMode === 'Bank / Credit') ? 'Cash / Credit' : v.paymentMode;
 
     if (isMr) {
       return {
@@ -208,12 +243,12 @@ export function exportVouchersToExcel(vouchers, filename = 'Pharmacy_Vouchers_Re
         'संदर्भ बिल क्र.': v.invoiceRef || '-',
         'एकूण औषधे संख्या': itemsCount,
         'औषधांचा तपशील': itemsNames,
-        'उप-एकूण (₹)': v.subtotal,
+        'उप-एकूण (₹)': subtotal,
         'जीएसटी %': v.taxPercent,
-        'जीएसटी रक्कम (₹)': v.taxAmount,
-        'सवलत (₹)': v.discount,
-        'एकूण बिल रक्कम (₹)': v.grandTotal,
-        'पेमेंट मोड': v.paymentMode,
+        'जीएसटी रक्कम (₹)': taxAmt,
+        'सवलत (₹)': disc,
+        'एकूण बिल रक्कम (₹)': grandTotal,
+        'पेमेंट मोड': payMode,
         'पेमेंट स्थिती': v.paymentStatus,
         'शेरा / टिपा': v.notes || '-',
       };
@@ -228,12 +263,12 @@ export function exportVouchersToExcel(vouchers, filename = 'Pharmacy_Vouchers_Re
         'Reference Invoice': v.invoiceRef || '-',
         'Items Count': itemsCount,
         'Medicines Breakdown': itemsNames,
-        'Subtotal (₹)': v.subtotal,
+        'Subtotal (₹)': subtotal,
         'GST %': v.taxPercent,
-        'Tax Amount (₹)': v.taxAmount,
-        'Discount (₹)': v.discount,
-        'Grand Total (₹)': v.grandTotal,
-        'Payment Mode': v.paymentMode,
+        'Tax Amount (₹)': taxAmt,
+        'Discount (₹)': disc,
+        'Grand Total (₹)': grandTotal,
+        'Payment Mode': payMode,
         'Payment Status': v.paymentStatus,
         'Notes / Narration': v.notes || '-',
       };
@@ -293,9 +328,37 @@ export function printVoucherHtml(voucher, storeProfile = {}, lang = 'en') {
       <td style="border: 1px solid #cbd5e1; padding: 6px;">${item.expiryDate || '-'}</td>
       <td style="border: 1px solid #cbd5e1; padding: 6px; text-align: right;">${item.quantity} ${item.unit || 'Strips'}</td>
       <td style="border: 1px solid #cbd5e1; padding: 6px; text-align: right;">₹${Number(item.rate || 0).toFixed(2)}</td>
-      <td style="border: 1px solid #cbd5e1; padding: 6px; text-align: right; font-weight: bold;">₹${Number(item.amount || ((item.quantity || 1) * (item.rate || 0))).toFixed(2)}</td>
+      <td style="border: 1px solid #cbd5e1; padding: 6px; text-align: right; font-weight: bold;">₹${Number(item.amount || ((parseFloat(item.quantity) || 1) * (parseFloat(item.rate) || 0))).toFixed(2)}</td>
     </tr>
   `).join('');
+
+  const itemsCalculatedSum = (voucher.items || []).reduce((sum, item) => {
+    const q = parseFloat(item.quantity) || 1;
+    const r = parseFloat(item.rate) || 0;
+    const a = parseFloat(item.amount) || (q * r);
+    return sum + a;
+  }, 0);
+
+  const subtotal = (parseFloat(voucher.subtotal) > 0)
+    ? parseFloat(voucher.subtotal)
+    : (parseFloat(voucher.totalAmount) > 0)
+      ? parseFloat(voucher.totalAmount)
+      : +itemsCalculatedSum.toFixed(2);
+
+  const taxPercent = parseFloat(voucher.taxPercent) || 0;
+  const taxAmount = (parseFloat(voucher.taxAmount) > 0)
+    ? parseFloat(voucher.taxAmount)
+    : +(subtotal * (taxPercent / 100)).toFixed(2);
+
+  const discount = parseFloat(voucher.discount) || 0;
+
+  const grandTotal = (parseFloat(voucher.grandTotal) > 0)
+    ? parseFloat(voucher.grandTotal)
+    : (parseFloat(voucher.netAmount) > 0)
+      ? parseFloat(voucher.netAmount)
+      : +(subtotal + taxAmount - discount).toFixed(2);
+
+  const paymentMode = (!voucher.paymentMode || voucher.paymentMode === 'Bank / Credit') ? 'Cash / Credit' : voucher.paymentMode;
 
   printWindow.document.write(`
     <!DOCTYPE html>
@@ -336,7 +399,7 @@ export function printVoucherHtml(voucher, storeProfile = {}, lang = 'en') {
           </div>
           <div>
             <div><strong>Party Name:</strong> ${voucher.partyName || 'Cash Customer'}</div>
-            <div><strong>Payment Mode:</strong> ${voucher.paymentMode || 'Cash'}</div>
+            <div><strong>Payment Mode:</strong> ${paymentMode}</div>
             <div><strong>Status:</strong> ${voucher.paymentStatus || 'PAID'}</div>
           </div>
         </div>
@@ -362,19 +425,19 @@ export function printVoucherHtml(voucher, storeProfile = {}, lang = 'en') {
           <table class="totals-table">
             <tr>
               <td>Subtotal:</td>
-              <td style="text-align: right; font-weight: bold;">₹${Number(voucher.subtotal || 0).toFixed(2)}</td>
+              <td style="text-align: right; font-weight: bold;">₹${subtotal.toFixed(2)}</td>
             </tr>
             <tr>
-              <td>GST Tax (${voucher.taxPercent || 0}%):</td>
-              <td style="text-align: right;">₹${Number(voucher.taxAmount || 0).toFixed(2)}</td>
+              <td>GST Tax (${taxPercent}%):</td>
+              <td style="text-align: right;">₹${taxAmount.toFixed(2)}</td>
             </tr>
             <tr>
               <td>Discount:</td>
-              <td style="text-align: right;">₹${Number(voucher.discount || 0).toFixed(2)}</td>
+              <td style="text-align: right;">₹${discount.toFixed(2)}</td>
             </tr>
             <tr class="grand-total">
               <td>Grand Total:</td>
-              <td style="text-align: right;">₹${Number(voucher.grandTotal || 0).toFixed(2)}</td>
+              <td style="text-align: right;">₹${grandTotal.toFixed(2)}</td>
             </tr>
           </table>
         </div>

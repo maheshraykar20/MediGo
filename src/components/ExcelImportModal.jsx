@@ -34,6 +34,7 @@ export default function ExcelImportModal({
   const [agencyName, setAgencyName] = useState('Om Sai Agency');
   const [invoiceNo, setInvoiceNo] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paymentMode, setPaymentMode] = useState('Cash / Credit');
   const [errorMsg, setErrorMsg] = useState('');
   const inputRef = useRef(null);
 
@@ -76,6 +77,7 @@ export default function ExcelImportModal({
       setAgencyName(cleanAgency);
       setInvoiceNo(result.invoiceMeta?.invoiceNo || `INV-${Date.now().toString().slice(-6)}`);
       setInvoiceDate(result.invoiceMeta?.invoiceDate || new Date().toISOString().split('T')[0]);
+      setPaymentMode('Cash / Credit');
     } catch (err) {
       console.error(err);
       setErrorMsg(
@@ -95,11 +97,26 @@ export default function ExcelImportModal({
     const cleanInvNo = invoiceNo.trim() || parsedData.invoiceMeta?.invoiceNo || `INV-${Date.now().toString().slice(-6)}`;
     const cleanInvDate = invoiceDate || parsedData.invoiceMeta?.invoiceDate || new Date().toISOString().split('T')[0];
 
+    const itemsCalculatedTotal = (parsedData.medicines || []).reduce((acc, m) => {
+      const q = parseFloat(m.stock) || 1;
+      const r = parseFloat(m.purchasePrice) || parseFloat(m.rate) || 0;
+      return acc + (q * r);
+    }, 0);
+
+    const calculatedTotal = (parseFloat(parsedData.invoiceMeta?.grandTotal) > 0)
+      ? parseFloat(parsedData.invoiceMeta.grandTotal)
+      : +itemsCalculatedTotal.toFixed(2);
+
     const finalInvoiceMeta = createVoucher ? {
       ...parsedData.invoiceMeta,
       supplierName: cleanAgency,
       invoiceNo: cleanInvNo,
       invoiceDate: cleanInvDate,
+      paymentMode: paymentMode || 'Cash / Credit',
+      subtotal: calculatedTotal,
+      totalAmount: calculatedTotal,
+      grandTotal: calculatedTotal,
+      netAmount: calculatedTotal,
     } : null;
 
     // Stamp clean agency/distributor on all medicines
@@ -120,6 +137,7 @@ export default function ExcelImportModal({
     setParsedData(null);
     setAgencyName('Om Sai Agency');
     setInvoiceNo('');
+    setPaymentMode('Cash / Credit');
   };
 
   return (
@@ -286,7 +304,7 @@ export default function ExcelImportModal({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2.5 pt-1 border-t border-teal-200/60">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 border-t border-teal-200/60">
                   <div>
                     <label className="block text-[11px] font-bold text-teal-900 mb-1">
                       {isMr ? 'इनव्हॉईस / बिल क्र.' : 'Invoice / Bill No.'}
@@ -310,14 +328,34 @@ export default function ExcelImportModal({
                       className="w-full px-2.5 py-1.5 bg-white border border-teal-200 rounded-lg text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
                     />
                   </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-teal-900 mb-1">
+                      {isMr ? 'पेमेंट पद्धत' : 'Payment Mode'}
+                    </label>
+                    <select
+                      value={paymentMode}
+                      onChange={(e) => setPaymentMode(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-teal-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    >
+                      <option value="Cash / Credit">Cash / Credit</option>
+                      <option value="Cash">Cash (रोख)</option>
+                      <option value="Credit">Credit (उधारी)</option>
+                      <option value="UPI / Online">UPI / QR Code</option>
+                      <option value="Bank NEFT / RTGS">Bank NEFT / RTGS</option>
+                    </select>
+                  </div>
                 </div>
 
-                {parsedData.invoiceMeta?.grandTotal > 0 && (
-                  <div className="flex items-center justify-between pt-1 border-t border-teal-200/60 text-teal-900">
-                    <span className="text-[11px] font-bold">{isMr ? 'एकूण इनव्हॉईस रक्कम:' : 'Invoice Grand Total:'}</span>
-                    <span className="text-sm font-black font-mono">₹{parsedData.invoiceMeta.grandTotal.toFixed(2)}</span>
-                  </div>
-                )}
+                <div className="flex items-center justify-between pt-2 border-t border-teal-200/60 text-teal-950">
+                  <span className="text-xs font-bold">{isMr ? 'एकूण इनव्हॉईस खरेदी रक्कम (Total Amount):' : 'Total Invoice Amount:'}</span>
+                  <span className="text-base font-black font-mono text-teal-800">
+                    ₹{(
+                      parseFloat(parsedData.invoiceMeta?.grandTotal) > 0
+                        ? parseFloat(parsedData.invoiceMeta.grandTotal)
+                        : (parsedData.medicines || []).reduce((acc, m) => acc + ((parseFloat(m.stock) || 1) * (parseFloat(m.purchasePrice) || parseFloat(m.rate) || 0)), 0)
+                    ).toFixed(2)}
+                  </span>
+                </div>
               </div>
 
               {/* Auto Create Purchase Voucher Checkbox */}

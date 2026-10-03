@@ -242,6 +242,15 @@ export function getUserDatabase(userId) {
     `).run();
   } catch (e) {}
 
+  // Auto-clean payment mode to Cash / Credit
+  try {
+    db.prepare(`
+      UPDATE vouchers 
+      SET payment_mode = 'Cash / Credit' 
+      WHERE payment_mode = 'Bank / Credit' OR payment_mode = 'BANK' OR payment_mode = '' OR payment_mode IS NULL
+    `).run();
+  } catch (e) {}
+
   openDatabases.set(dbKey, db);
   return db;
 }
@@ -735,27 +744,58 @@ export function cleanPartyName(name, fallback = 'Om Sai Agency') {
   return s;
 }
 
+export function cleanPaymentMode(mode) {
+  if (!mode || typeof mode !== 'string') return 'Cash / Credit';
+  const m = mode.trim();
+  if (m === 'Bank / Credit' || m === 'BANK' || m.toLowerCase() === 'bank') return 'Cash / Credit';
+  return m;
+}
+
 export function getDbUserVouchers(userId) {
   const db = getUserDatabase(userId);
   const rows = db.prepare(`SELECT * FROM vouchers ORDER BY date DESC, created_at DESC`).all();
 
-  return rows.map(r => ({
-    id: r.id,
-    userId: userId,
-    voucherNo: r.voucher_no,
-    voucherType: r.voucher_type,
-    partyName: cleanPartyName(r.party_name, r.voucher_type === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer'),
-    partyPhone: r.party_phone,
-    partyGstin: r.party_gstin,
-    date: r.date,
-    paymentMode: r.payment_mode,
-    items: JSON.parse(r.items_json || '[]'),
-    totalAmount: r.total_amount,
-    taxAmount: r.tax_amount,
-    netAmount: r.net_amount,
-    notes: r.notes,
-    createdAt: r.created_at,
-  }));
+  return rows.map(r => {
+    const items = JSON.parse(r.items_json || '[]');
+    let totalAmt = parseFloat(r.total_amount) || 0;
+    let netAmt = parseFloat(r.net_amount) || 0;
+
+    // Self-heal: If total is 0 but items exist, compute total from items
+    if (totalAmt <= 0 && items.length > 0) {
+      totalAmt = items.reduce((sum, it) => {
+        const qty = parseFloat(it.quantity || it.stock) || 1;
+        const rate = parseFloat(it.rate || it.purchasePrice || it.mrp) || 0;
+        const amt = parseFloat(it.amount) || (qty * rate);
+        return sum + amt;
+      }, 0);
+      totalAmt = +totalAmt.toFixed(2);
+    }
+    if (netAmt <= 0) {
+      netAmt = +(totalAmt + (parseFloat(r.tax_amount) || 0)).toFixed(2);
+    }
+
+    const payMode = cleanPaymentMode(r.payment_mode);
+
+    return {
+      id: r.id,
+      userId: userId,
+      voucherNo: r.voucher_no,
+      voucherType: r.voucher_type,
+      partyName: cleanPartyName(r.party_name, r.voucher_type === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer'),
+      partyPhone: r.party_phone,
+      partyGstin: r.party_gstin,
+      date: r.date,
+      paymentMode: payMode,
+      items: items,
+      totalAmount: totalAmt,
+      subtotal: totalAmt,
+      taxAmount: r.tax_amount,
+      netAmount: netAmt,
+      grandTotal: netAmt,
+      notes: r.notes,
+      createdAt: r.created_at,
+    };
+  });
 }
 
 export function saveDbUserVoucher(userId, voucher) {
@@ -764,6 +804,23 @@ export function saveDbUserVoucher(userId, voucher) {
   const vId = voucher.id || `vch-${Date.now()}`;
   const vType = voucher.voucherType || 'PURCHASE';
   const cleanParty = cleanPartyName(voucher.partyName, vType === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer');
+  const items = Array.isArray(voucher.items) ? voucher.items : [];
+
+  let totalAmt = parseFloat(voucher.totalAmount || voucher.subtotal || voucher.grandTotal) || 0;
+  if (totalAmt <= 0 && items.length > 0) {
+    totalAmt = items.reduce((sum, it) => {
+      const qty = parseFloat(it.quantity || it.stock) || 1;
+      const rate = parseFloat(it.rate || it.purchasePrice || it.mrp) || 0;
+      const amt = parseFloat(it.amount) || (qty * rate);
+      return sum + amt;
+    }, 0);
+    totalAmt = +totalAmt.toFixed(2);
+  }
+  let netAmt = parseFloat(voucher.netAmount || voucher.grandTotal || voucher.totalAmount) || 0;
+  if (netAmt <= 0) {
+    netAmt = +(totalAmt + (parseFloat(voucher.taxAmount) || 0)).toFixed(2);
+  }
+  const payMode = cleanPaymentMode(voucher.paymentMode);
 
   db.prepare(`
     INSERT INTO vouchers (id, voucher_no, voucher_type, party_name, party_phone, party_gstin, date, payment_mode, items_json, total_amount, tax_amount, net_amount, notes, created_at)
@@ -789,11 +846,11 @@ export function saveDbUserVoucher(userId, voucher) {
     voucher.partyPhone || '',
     voucher.partyGstin || '',
     voucher.date || now.split('T')[0],
-    voucher.paymentMode || 'CASH',
-    JSON.stringify(voucher.items || []),
-    parseFloat(voucher.totalAmount) || 0,
+    payMode,
+    JSON.stringify(items),
+    totalAmt,
     parseFloat(voucher.taxAmount) || 0,
-    parseFloat(voucher.netAmount) || 0,
+    netAmt,
     voucher.notes || '',
     voucher.createdAt || now
   );
@@ -818,8 +875,8 @@ export function saveDbUserVoucher(userId, voucher) {
     userId,
     actionType: 'VOUCHER_SAVED',
     title: `नवीन व्हाउचर नोंद: ${voucher.voucherNo || 'VCH'}`,
-    description: `${storeLabel} ने नवीन ${voucher.voucherType === 'PURCHASE' ? 'खरेदी बिल' : voucher.voucherType === 'SALES' ? 'विक्री बिल' : 'व्हाउचर'} नोंदवले (पार्टी: ${voucher.partyName || '-'}, रक्कम: ₹${voucher.netAmount || 0}).`,
-    details: { id: vId, voucherNo: voucher.voucherNo, type: voucher.voucherType, party: voucher.partyName, netAmount: voucher.netAmount, itemsCount: (voucher.items || []).length }
+    description: `${storeLabel} ने नवीन ${voucher.voucherType === 'PURCHASE' ? 'खरेदी बिल' : voucher.voucherType === 'SALES' ? 'विक्री बिल' : 'व्हाउचर'} नोंदवले (पार्टी: ${cleanParty}, रक्कम: ₹${netAmt}).`,
+    details: { id: vId, voucherNo: voucher.voucherNo, type: voucher.voucherType, party: cleanParty, netAmount: netAmt, itemsCount: items.length }
   });
 
   return { success: true, id: vId };
@@ -849,6 +906,23 @@ export function syncDbAllVouchers(userId, vouchersList) {
     `);
 
     for (const v of vouchersList) {
+      const items = Array.isArray(v.items) ? v.items : [];
+      let totalAmt = parseFloat(v.totalAmount || v.subtotal || v.grandTotal) || 0;
+      if (totalAmt <= 0 && items.length > 0) {
+        totalAmt = items.reduce((sum, it) => {
+          const qty = parseFloat(it.quantity || it.stock) || 1;
+          const rate = parseFloat(it.rate || it.purchasePrice || it.mrp) || 0;
+          const amt = parseFloat(it.amount) || (qty * rate);
+          return sum + amt;
+        }, 0);
+        totalAmt = +totalAmt.toFixed(2);
+      }
+      let netAmt = parseFloat(v.netAmount || v.grandTotal || v.totalAmount) || 0;
+      if (netAmt <= 0) {
+        netAmt = +(totalAmt + (parseFloat(v.taxAmount) || 0)).toFixed(2);
+      }
+      const payMode = cleanPaymentMode(v.paymentMode);
+
       insertStmt.run(
         v.id || `vch-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         v.voucherNo || `VCH-${Date.now().toString().slice(-6)}`,
@@ -857,11 +931,11 @@ export function syncDbAllVouchers(userId, vouchersList) {
         v.partyPhone || '',
         v.partyGstin || '',
         v.date || now.split('T')[0],
-        v.paymentMode || 'CASH',
-        JSON.stringify(v.items || []),
-        parseFloat(v.totalAmount) || 0,
+        payMode,
+        JSON.stringify(items),
+        totalAmt,
         parseFloat(v.taxAmount) || 0,
-        parseFloat(v.netAmount) || 0,
+        netAmt,
         v.notes || '',
         v.createdAt || now
       );

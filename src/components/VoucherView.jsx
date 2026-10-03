@@ -57,6 +57,28 @@ export default function VoucherView({
     setEditingPartyVch(null);
   };
 
+  const getVoucherTotal = (v) => {
+    if (!v) return 0;
+    const direct = parseFloat(v.grandTotal) || parseFloat(v.netAmount) || parseFloat(v.totalAmount) || parseFloat(v.subtotal) || 0;
+    if (direct > 0) return direct;
+    if (Array.isArray(v.items) && v.items.length > 0) {
+      return v.items.reduce((sum, it) => {
+        const q = parseFloat(it.quantity || it.stock) || 1;
+        const r = parseFloat(it.rate || it.purchasePrice || it.mrp) || 0;
+        const amt = parseFloat(it.amount) || (q * r);
+        return sum + amt;
+      }, 0);
+    }
+    return 0;
+  };
+
+  const getVoucherPaymentMode = (v) => {
+    if (!v || !v.paymentMode || v.paymentMode === 'Bank / Credit' || v.paymentMode === 'BANK') {
+      return 'Cash / Credit';
+    }
+    return v.paymentMode;
+  };
+
   // Calculations
   const stats = useMemo(() => {
     let purchaseTotal = 0;
@@ -65,7 +87,7 @@ export default function VoucherView({
     let expenseTotal = 0;
 
     vouchers.forEach(v => {
-      const amt = parseFloat(v.grandTotal) || 0;
+      const amt = getVoucherTotal(v);
       if (v.voucherType === 'PURCHASE') purchaseTotal += amt;
       else if (v.voucherType === 'SALES') salesTotal += amt;
       else if (v.voucherType === 'RETURN') returnTotal += amt;
@@ -353,9 +375,9 @@ export default function VoucherView({
                       {/* Grand Total */}
                       <td className="py-3 px-3">
                         <div className="font-extrabold text-slate-900 text-xs sm:text-sm">
-                          ₹{Number(vch.grandTotal || 0).toFixed(2)}
+                          ₹{getVoucherTotal(vch).toFixed(2)}
                         </div>
-                        <div className="text-[10px] text-slate-400">{vch.paymentMode}</div>
+                        <div className="text-[10px] text-slate-500 font-semibold">{getVoucherPaymentMode(vch)}</div>
                       </td>
 
                       {/* Status */}

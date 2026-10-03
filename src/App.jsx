@@ -485,6 +485,29 @@ export default function App() {
 
     // Auto-create purchase voucher if invoiceMeta was detected or requested
     if (invoiceMeta && importedMeds.length > 0) {
+      const voucherItems = importedMeds.map(m => {
+        const qty = parseFloat(m.stock) || 1;
+        const rate = parseFloat(m.purchasePrice) || parseFloat(m.rate) || 0;
+        return {
+          name: m.name,
+          batchNo: m.batchNo,
+          expiryDate: m.expiryDate,
+          quantity: qty,
+          unit: m.unit || 'Strips',
+          rate: rate,
+          mrp: parseFloat(m.mrp) || (rate ? +(rate * 1.3).toFixed(2) : 35),
+          amount: +(qty * rate).toFixed(2),
+        };
+      });
+
+      const calculatedSubtotal = voucherItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+      const taxPercent = parseFloat(invoiceMeta.taxPercent) || 0;
+      const taxAmount = +(calculatedSubtotal * (taxPercent / 100)).toFixed(2);
+      const discount = parseFloat(invoiceMeta.discount) || 0;
+      const finalGrandTotal = (parseFloat(invoiceMeta.grandTotal) > 0)
+        ? parseFloat(invoiceMeta.grandTotal)
+        : +(calculatedSubtotal + taxAmount - discount).toFixed(2);
+
       const purchaseVoucher = {
         id: `vch-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         voucherType: 'PURCHASE',
@@ -493,23 +516,18 @@ export default function App() {
         partyName: sanitizePartyName(invoiceMeta.supplierName, 'Om Sai Agency'),
         partyPhone: '',
         invoiceRef: invoiceMeta.invoiceNo || '',
-        paymentMode: 'Bank / Credit',
+        paymentMode: invoiceMeta.paymentMode || 'Cash / Credit',
         paymentStatus: 'PAID',
         notes: `Imported invoice (${importedMeds.length} items)`,
-        taxPercent: 12,
-        discount: 0,
+        taxPercent: taxPercent,
+        taxAmount: taxAmount,
+        discount: discount,
+        subtotal: calculatedSubtotal,
+        totalAmount: calculatedSubtotal,
+        grandTotal: finalGrandTotal,
+        netAmount: finalGrandTotal,
         updateStock: false, // Already added directly to inventory
-        items: importedMeds.map(m => ({
-          name: m.name,
-          batchNo: m.batchNo,
-          expiryDate: m.expiryDate,
-          quantity: m.stock,
-          unit: m.unit,
-          rate: m.purchasePrice,
-          mrp: m.mrp,
-          amount: +(m.stock * m.purchasePrice).toFixed(2),
-        })),
-        grandTotal: invoiceMeta.grandTotal || importedMeds.reduce((sum, m) => sum + (m.stock * m.purchasePrice), 0),
+        items: voucherItems,
         createdAt: new Date().toISOString(),
       };
       handleSaveVoucher(purchaseVoucher);

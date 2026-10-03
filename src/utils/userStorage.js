@@ -284,6 +284,44 @@ export function saveUserInventory(userId, inventory) {
   }
 }
 
+// Normalizes voucher totals, payment mode, and party name
+export function normalizeVoucher(v, userId) {
+  if (!v) return v;
+  const items = Array.isArray(v.items) ? v.items : [];
+  let calculatedTotal = parseFloat(v.grandTotal) || parseFloat(v.netAmount) || parseFloat(v.totalAmount) || parseFloat(v.subtotal) || 0;
+  
+  if (calculatedTotal <= 0 && items.length > 0) {
+    calculatedTotal = items.reduce((sum, item) => {
+      const q = parseFloat(item.quantity || item.stock) || 1;
+      const r = parseFloat(item.rate || item.purchasePrice || item.mrp) || 0;
+      const amt = parseFloat(item.amount) || (q * r);
+      return sum + amt;
+    }, 0);
+    calculatedTotal = +calculatedTotal.toFixed(2);
+  }
+
+  const cleanParty = sanitizePartyName(v.partyName, (v.voucherType === 'PURCHASE') ? 'Om Sai Agency' : 'Walk-in Customer');
+  let payMode = v.paymentMode;
+  if (!payMode || payMode === 'Bank / Credit' || payMode === 'BANK') {
+    payMode = 'Cash / Credit';
+  }
+
+  const tax = parseFloat(v.taxAmount) || 0;
+  const finalNet = (calculatedTotal > 0) ? +(calculatedTotal + tax).toFixed(2) : 0;
+
+  return {
+    ...v,
+    userId: userId || v.userId,
+    partyName: cleanParty,
+    paymentMode: payMode,
+    subtotal: calculatedTotal,
+    totalAmount: calculatedTotal,
+    grandTotal: finalNet || calculatedTotal,
+    netAmount: finalNet || calculatedTotal,
+    items: items,
+  };
+}
+
 // Returns the user's saved vouchers. ALWAYS STARTS 100% BLANK [] FOR ANY NEW USER!
 export function getUserVouchers(userId) {
   if (!userId) return [];
@@ -295,12 +333,15 @@ export function getUserVouchers(userId) {
       if (Array.isArray(parsed) && parsed.length > 0) {
         let hasSanitized = false;
         const cleaned = parsed.map(v => {
-          const cleanParty = sanitizePartyName(v.partyName, v.voucherType === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer');
-          if (cleanParty !== v.partyName) {
+          const norm = normalizeVoucher(v, userId);
+          if (
+            norm.partyName !== v.partyName || 
+            norm.grandTotal !== v.grandTotal || 
+            norm.paymentMode !== v.paymentMode
+          ) {
             hasSanitized = true;
-            return { ...v, partyName: cleanParty };
           }
-          return v;
+          return norm;
         });
         if (hasSanitized) {
           try { localStorage.setItem(key, JSON.stringify(cleaned)); } catch {}
@@ -322,11 +363,7 @@ export function getUserVouchers(userId) {
       if (rawOther) {
         const parsedOther = JSON.parse(rawOther);
         if (Array.isArray(parsedOther) && parsedOther.length > 0) {
-          const migrated = parsedOther.map(v => ({ 
-            ...v, 
-            userId,
-            partyName: sanitizePartyName(v.partyName, v.voucherType === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer')
-          }));
+          const migrated = parsedOther.map(v => normalizeVoucher(v, userId));
           try { localStorage.setItem(key, JSON.stringify(migrated)); } catch {}
           api.apiSyncVouchers(userId, migrated).catch(() => {});
           return migrated;
@@ -343,10 +380,7 @@ export function saveUserVouchers(userId, vouchers) {
   if (!userId) return;
   const key = `medvault_vouchers_${userId}`;
   try {
-    const cleaned = (vouchers || []).map(v => ({
-      ...v,
-      partyName: sanitizePartyName(v.partyName, v.voucherType === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer'),
-    }));
+    const cleaned = (vouchers || []).map(v => normalizeVoucher(v, userId));
     localStorage.setItem(key, JSON.stringify(cleaned));
     // Persist to user's dedicated SQLite database!
     // SAFETY GUARD: Only sync array if non-empty to prevent accidental wipes
@@ -558,14 +592,14 @@ export async function loadUserDataFromDatabase(userId) {
       : null;
 
     if (serverVchs && serverVchs.length > 0) {
-      const taggedVchs = serverVchs.map(v => ({ ...v, userId }));
+      const taggedVchs = serverVchs.map(v => normalizeVoucher(v, userId));
       try {
         localStorage.setItem(`medvault_vouchers_${userId}`, JSON.stringify(taggedVchs));
       } catch {}
       result.vouchers = taggedVchs;
     } else if (localVchs && localVchs.length > 0) {
       // Server SQLite empty, restore from client cache
-      const taggedVchs = localVchs.map(v => ({ ...v, userId }));
+      const taggedVchs = localVchs.map(v => normalizeVoucher(v, userId));
       result.vouchers = taggedVchs;
       api.apiSyncVouchers(userId, taggedVchs).catch(e => console.warn('SQLite auto-restore vouchers:', e));
     } else {
