@@ -17,6 +17,7 @@ import {
   Printer
 } from 'lucide-react';
 import { playSuccessSound } from '../utils/notificationSound';
+import { sanitizePartyName } from '../utils/excelUtils';
 
 export default function VoucherEntryModal({ 
   isOpen, 
@@ -51,7 +52,7 @@ export default function VoucherEntryModal({
       setVoucherType(existingVoucher.voucherType);
       setVoucherNo(existingVoucher.voucherNo);
       setDate(existingVoucher.date);
-      setPartyName(existingVoucher.partyName || '');
+      setPartyName(sanitizePartyName(existingVoucher.partyName, existingVoucher.voucherType === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer'));
       setPartyPhone(existingVoucher.partyPhone || '');
       setInvoiceRef(existingVoucher.invoiceRef || '');
       setPaymentMode(existingVoucher.paymentMode || 'Cash');
@@ -66,7 +67,7 @@ export default function VoucherEntryModal({
       const randomNum = Math.floor(100 + Math.random() * 900);
       setVoucherNo(`${prefix}-${new Date().getFullYear()}-${randomNum}`);
       setDate(new Date().toISOString().split('T')[0]);
-      setPartyName('');
+      setPartyName(voucherType === 'PURCHASE' ? 'Om Sai Agency' : voucherType === 'SALES' ? 'Walk-in Customer' : '');
       setPartyPhone('');
       setInvoiceRef('');
       setPaymentMode('Cash');
@@ -263,16 +264,31 @@ export default function VoucherEntryModal({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                {voucherType === 'PURCHASE' ? (isMr ? 'सप्लायर नाव *' : 'Distributor / Supplier Name *') : (isMr ? 'ग्राहक / पार्टी नाव *' : 'Party / Customer Name *')}
+                {voucherType === 'PURCHASE' ? (isMr ? 'सप्लायर / एजन्सी नाव *' : 'Distributor / Agency Name *') : (isMr ? 'ग्राहक / पार्टी नाव *' : 'Party / Customer Name *')}
               </label>
               <input
                 type="text"
                 required
                 value={partyName}
                 onChange={(e) => setPartyName(e.target.value)}
-                placeholder={isMr ? 'उदा. Balaji Pharma Distributors' : 'e.g. Balaji Pharma Distributors'}
+                placeholder={isMr ? 'उदा. Om Sai Agency, Mayur Raykar' : 'e.g. Om Sai Agency, Mayur Raykar'}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/30"
               />
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {(voucherType === 'PURCHASE' 
+                  ? ['Om Sai Agency', 'Mayur Raykar', 'Seema Ayurvedic Aushadhalay', 'Shree Ganesh Pharma']
+                  : ['Walk-in Customer', 'Regular Patient', 'Dr. Clinic Sale']
+                ).map((sugg) => (
+                  <button
+                    key={sugg}
+                    type="button"
+                    onClick={() => setPartyName(sugg)}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-800 hover:bg-teal-100 border border-teal-200 font-medium transition cursor-pointer"
+                  >
+                    {sugg}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div>

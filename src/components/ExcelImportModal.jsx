@@ -11,9 +11,10 @@ import {
   RefreshCw,
   Plus,
   FileCheck,
-  Receipt
+  Receipt,
+  Building2
 } from 'lucide-react';
-import { parseInvoiceDocument, downloadSampleTemplate } from '../utils/excelUtils';
+import { parseInvoiceDocument, downloadSampleTemplate, sanitizePartyName } from '../utils/excelUtils';
 import { playSuccessSound } from '../utils/notificationSound';
 import { formatDisplayDate } from '../utils/expiryUtils';
 
@@ -30,6 +31,9 @@ export default function ExcelImportModal({
   const [parsedData, setParsedData] = useState(null);
   const [importMode, setImportMode] = useState('append'); // 'append' or 'replace'
   const [createVoucher, setCreateVoucher] = useState(true);
+  const [agencyName, setAgencyName] = useState('Om Sai Agency');
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
   const [errorMsg, setErrorMsg] = useState('');
   const inputRef = useRef(null);
 
@@ -68,6 +72,10 @@ export default function ExcelImportModal({
     try {
       const result = await parseInvoiceDocument(selectedFile);
       setParsedData(result);
+      const cleanAgency = sanitizePartyName(result.invoiceMeta?.supplierName, 'Om Sai Agency');
+      setAgencyName(cleanAgency);
+      setInvoiceNo(result.invoiceMeta?.invoiceNo || `INV-${Date.now().toString().slice(-6)}`);
+      setInvoiceDate(result.invoiceMeta?.invoiceDate || new Date().toISOString().split('T')[0]);
     } catch (err) {
       console.error(err);
       setErrorMsg(
@@ -83,16 +91,35 @@ export default function ExcelImportModal({
   const handleConfirmImport = () => {
     if (!parsedData || parsedData.medicines.length === 0) return;
 
+    const cleanAgency = sanitizePartyName(agencyName.trim(), 'Om Sai Agency');
+    const cleanInvNo = invoiceNo.trim() || parsedData.invoiceMeta?.invoiceNo || `INV-${Date.now().toString().slice(-6)}`;
+    const cleanInvDate = invoiceDate || parsedData.invoiceMeta?.invoiceDate || new Date().toISOString().split('T')[0];
+
+    const finalInvoiceMeta = createVoucher ? {
+      ...parsedData.invoiceMeta,
+      supplierName: cleanAgency,
+      invoiceNo: cleanInvNo,
+      invoiceDate: cleanInvDate,
+    } : null;
+
+    // Stamp clean agency/distributor on all medicines
+    const finalMeds = parsedData.medicines.map(m => ({
+      ...m,
+      distributor: cleanAgency,
+    }));
+
     onImportComplete(
-      parsedData.medicines, 
+      finalMeds, 
       importMode, 
-      createVoucher ? parsedData.invoiceMeta : null
+      finalInvoiceMeta
     );
     playSuccessSound();
     onClose();
     // Reset state
     setFile(null);
     setParsedData(null);
+    setAgencyName('Om Sai Agency');
+    setInvoiceNo('');
   };
 
   return (
@@ -222,34 +249,76 @@ export default function ExcelImportModal({
                 </button>
               </div>
 
-              {/* Detected Invoice Metadata Banner */}
-              {parsedData.invoiceMeta && (
-                <div className="p-3 rounded-xl bg-teal-50/80 border border-teal-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-left">
-                  <div className="flex items-center gap-2">
-                    <Receipt className="w-4 h-4 text-teal-700 shrink-0" />
-                    <div>
-                      <span className="font-bold text-teal-950">
-                        {parsedData.invoiceMeta.supplierName}
-                      </span>
-                      <div className="text-[11px] text-teal-700 flex items-center gap-2">
-                        <span>Inv: <b className="font-mono text-slate-800">{parsedData.invoiceMeta.invoiceNo}</b></span>
-                        <span>•</span>
-                        <span>Date: <b className="font-mono text-slate-800">{parsedData.invoiceMeta.invoiceDate}</b></span>
-                      </div>
-                    </div>
+              {/* Supplier / Agency & Invoice Configuration */}
+              <div className="p-3.5 rounded-2xl bg-teal-50/70 border border-teal-200 text-xs space-y-3 text-left">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-teal-950 flex items-center gap-1.5 text-xs sm:text-sm">
+                      <Building2 className="w-4 h-4 text-teal-700" />
+                      <span>{isMr ? 'सप्लायर / एजन्सीचे नाव (Supplier / Agency Name) *' : 'Distributor / Agency Name *'}</span>
+                    </label>
+                    <span className="text-[10px] text-teal-700 font-semibold">{isMr ? 'व्हाउचरमध्ये हेच नाव दिसेल' : 'Visible in voucher'}</span>
                   </div>
-                  {parsedData.invoiceMeta.grandTotal > 0 && (
-                    <div className="text-right">
-                      <div className="text-[10px] text-teal-600 font-bold uppercase tracking-wider">
-                        {isMr ? 'एकूण रक्कम' : 'Total Amount'}
-                      </div>
-                      <div className="text-sm font-black text-teal-900 font-mono">
-                        ₹{parsedData.invoiceMeta.grandTotal.toFixed(2)}
-                      </div>
-                    </div>
-                  )}
+                  <input
+                    type="text"
+                    value={agencyName}
+                    onChange={(e) => setAgencyName(e.target.value)}
+                    placeholder={isMr ? 'उदा. Om Sai Agency, Mayur Raykar...' : 'e.g. Om Sai Agency, Mayur Raykar...'}
+                    className="w-full px-3 py-2 bg-white border border-teal-300 rounded-xl text-slate-900 font-bold text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-xs"
+                  />
+                  {/* Quick Suggestion Chips */}
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                    <span className="text-[10px] text-teal-800 font-semibold">{isMr ? 'झटपट निवडा:' : 'Quick Select:'}</span>
+                    {['Om Sai Agency', 'Mayur Raykar', 'Seema Ayurvedic Aushadhalay', 'Shree Ganesh Pharma'].map((ag) => (
+                      <button
+                        key={ag}
+                        type="button"
+                        onClick={() => setAgencyName(ag)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                          agencyName === ag
+                            ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                            : 'bg-white text-teal-900 border-teal-200 hover:bg-teal-100 hover:border-teal-400'
+                        }`}
+                      >
+                        {ag}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              )}
+
+                <div className="grid grid-cols-2 gap-2.5 pt-1 border-t border-teal-200/60">
+                  <div>
+                    <label className="block text-[11px] font-bold text-teal-900 mb-1">
+                      {isMr ? 'इनव्हॉईस / बिल क्र.' : 'Invoice / Bill No.'}
+                    </label>
+                    <input
+                      type="text"
+                      value={invoiceNo}
+                      onChange={(e) => setInvoiceNo(e.target.value)}
+                      placeholder="CR-004621"
+                      className="w-full px-2.5 py-1.5 bg-white border border-teal-200 rounded-lg text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-teal-900 mb-1">
+                      {isMr ? 'बिल तारीख' : 'Invoice Date'}
+                    </label>
+                    <input
+                      type="date"
+                      value={invoiceDate}
+                      onChange={(e) => setInvoiceDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-teal-200 rounded-lg text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
+                </div>
+
+                {parsedData.invoiceMeta?.grandTotal > 0 && (
+                  <div className="flex items-center justify-between pt-1 border-t border-teal-200/60 text-teal-900">
+                    <span className="text-[11px] font-bold">{isMr ? 'एकूण इनव्हॉईस रक्कम:' : 'Invoice Grand Total:'}</span>
+                    <span className="text-sm font-black font-mono">₹{parsedData.invoiceMeta.grandTotal.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
 
               {/* Auto Create Purchase Voucher Checkbox */}
               <label className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-50/60 border border-emerald-200 text-xs cursor-pointer text-left">

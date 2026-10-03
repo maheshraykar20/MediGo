@@ -1,5 +1,6 @@
 // Multi-tenant and User Isolation storage utilities (Supports 500+ Private Pharmacy Stores)
 import * as api from './apiService.js';
+import { sanitizePartyName } from './excelUtils.js';
 
 const SESSION_USER_KEY = 'medvault_auth_session_user_v1';
 const CURRENT_USER_KEY = 'medvault_auth_active_user_v1';
@@ -291,7 +292,22 @@ export function getUserVouchers(userId) {
     const raw = localStorage.getItem(key);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        let hasSanitized = false;
+        const cleaned = parsed.map(v => {
+          const cleanParty = sanitizePartyName(v.partyName, v.voucherType === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer');
+          if (cleanParty !== v.partyName) {
+            hasSanitized = true;
+            return { ...v, partyName: cleanParty };
+          }
+          return v;
+        });
+        if (hasSanitized) {
+          try { localStorage.setItem(key, JSON.stringify(cleaned)); } catch {}
+          api.apiSyncVouchers(userId, cleaned).catch(() => {});
+        }
+        return cleaned;
+      }
     }
   } catch (e) {
     console.error('Failed to load user vouchers:', e);
@@ -306,7 +322,11 @@ export function getUserVouchers(userId) {
       if (rawOther) {
         const parsedOther = JSON.parse(rawOther);
         if (Array.isArray(parsedOther) && parsedOther.length > 0) {
-          const migrated = parsedOther.map(v => ({ ...v, userId }));
+          const migrated = parsedOther.map(v => ({ 
+            ...v, 
+            userId,
+            partyName: sanitizePartyName(v.partyName, v.voucherType === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer')
+          }));
           try { localStorage.setItem(key, JSON.stringify(migrated)); } catch {}
           api.apiSyncVouchers(userId, migrated).catch(() => {});
           return migrated;
@@ -323,11 +343,15 @@ export function saveUserVouchers(userId, vouchers) {
   if (!userId) return;
   const key = `medvault_vouchers_${userId}`;
   try {
-    localStorage.setItem(key, JSON.stringify(vouchers));
+    const cleaned = (vouchers || []).map(v => ({
+      ...v,
+      partyName: sanitizePartyName(v.partyName, v.voucherType === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer'),
+    }));
+    localStorage.setItem(key, JSON.stringify(cleaned));
     // Persist to user's dedicated SQLite database!
     // SAFETY GUARD: Only sync array if non-empty to prevent accidental wipes
-    if (Array.isArray(vouchers) && vouchers.length > 0) {
-      api.apiSyncVouchers(userId, vouchers).catch(e => console.warn('SQLite vouchers sync:', e));
+    if (Array.isArray(cleaned) && cleaned.length > 0) {
+      api.apiSyncVouchers(userId, cleaned).catch(e => console.warn('SQLite vouchers sync:', e));
     }
   } catch (e) {
     console.error('Failed to save user vouchers:', e);

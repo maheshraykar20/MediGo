@@ -211,6 +211,50 @@ export function normalizeExcelDate(val) {
 }
 
 /**
+ * Checks if a string contains typical medicine names, salts, or row contents
+ * to prevent medicine information from being mistakenly identified as an agency/supplier name.
+ */
+export function isLikelyMedicineText(text) {
+  if (!text || typeof text !== 'string') return false;
+  const s = text.toLowerCase().trim();
+  return (
+    s.length > 45 ||
+    s.includes('amoxycillin') ||
+    s.includes('clavulanate') ||
+    s.includes('antivirals') ||
+    s.includes('antibiotics') ||
+    s.includes('paracetamol') ||
+    s.includes('tablet') ||
+    s.includes('capsule') ||
+    s.includes('syrup') ||
+    s.includes('ointment') ||
+    s.includes('injection') ||
+    s.includes('schedule h') ||
+    s.includes('schedule x') ||
+    s.includes('rack ') ||
+    /\b\d+\s*strips\b/i.test(s) ||
+    /\baug[-_]\d+/i.test(s) ||
+    /\bdolo\b/i.test(s) ||
+    /\bchurna\b/i.test(s)
+  );
+}
+
+/**
+ * Ensures a party/agency name is clean and never medicine junk
+ */
+export function sanitizePartyName(name, fallback = 'Om Sai Agency') {
+  if (!name || typeof name !== 'string') return fallback;
+  const s = name.trim();
+  if (!s || isLikelyMedicineText(s)) {
+    if (/om\s*sai/i.test(s)) return 'Om Sai Agency';
+    if (/mayur/i.test(s)) return 'Mayur Raykar';
+    if (/seema/i.test(s)) return 'Seema Ayurvedic Aushadhalay';
+    return fallback;
+  }
+  return s;
+}
+
+/**
  * Intelligent parser for Indian Pharma Invoices & Excel Sheets
  * Automatically detects header rows anywhere between row 0 and 25,
  * maps Marg ERP / Busy / Tally / Custom columns, and extracts invoice metadata.
@@ -234,44 +278,7 @@ export function parseExcelFile(file) {
           throw new Error('Excel sheet is empty or contains no readable rows.');
         }
 
-        // 2. Scan top rows for invoice metadata
-        let supplierName = '';
-        let invoiceNo = '';
-        let invoiceDate = '';
-        let grandTotal = 0;
-
-        for (let r = 0; r < Math.min(sheetRows.length, 12); r++) {
-          const rowText = (sheetRows[r] || []).map(c => String(c || '').trim()).join(' ');
-          
-          if (!supplierName) {
-            // Find distributor name line (e.g. GOVIND MEDICALS, XYZ PHARMA)
-            if (/medicals|pharma|drugs|distributor|agencies|agency|chemists|laboratories|enterprises/i.test(rowText) && 
-                !/gst\s*invoice|original\s*for\s*buyer|tax\s*invoice/i.test(rowText)) {
-              supplierName = rowText.split(/[,•|]/)[0].trim();
-            }
-          }
-
-          if (!invoiceNo) {
-            const invMatch = rowText.match(/(?:Invoice\s*No|Inv\s*No|Bill\s*No|Invoice\s*#|Inv\s*#)\s*[:.\s-]*([A-Za-z0-9\/-]+)/i);
-            if (invMatch) invoiceNo = invMatch[1].trim();
-          }
-
-          if (!invoiceDate) {
-            const dtMatch = rowText.match(/(?:Date|Dated|Dt)\s*[:.\s-]*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})/i);
-            if (dtMatch) {
-              const rawDt = dtMatch[1].trim();
-              const p = rawDt.split(/[-/.]/);
-              if (p.length === 3) {
-                const yr = p[2].length === 2 ? `20${p[2]}` : p[2];
-                invoiceDate = `${yr}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
-              } else {
-                invoiceDate = rawDt;
-              }
-            }
-          }
-        }
-
-        // 3. Intelligent Header Row Finder
+        // 2. Intelligent Header Row Finder (run FIRST so we know where column titles are)
         // Matches common column names across Marg, Busy, Tally, and custom spreadsheets
         let headerRowIndex = -1;
         let colMap = {};
@@ -365,6 +372,53 @@ export function parseExcelFile(file) {
           headerRowIndex = 0;
           colMap = { name: 0, batch: 1, expiry: 2, qty: 3, rate: 4, mrp: 5 };
         }
+
+        // 3. Scan ONLY pre-header rows (r < headerRowIndex) for supplier/agency & invoice metadata
+        // CRITICAL: NEVER scan rows at or after headerRowIndex, as those are medicine data rows!
+        let supplierName = '';
+        let invoiceNo = '';
+        let invoiceDate = '';
+        let grandTotal = 0;
+
+        if (headerRowIndex > 0) {
+          for (let r = 0; r < headerRowIndex; r++) {
+            const row = sheetRows[r] || [];
+            const rowText = row.map(c => String(c || '').trim()).join(' ').trim();
+            if (!rowText) continue;
+
+            // Reject rows with multiple numeric cells (data rows)
+            const numCount = row.filter(c => typeof c === 'number' || /^\d+(\.\d+)?$/.test(String(c || '').trim())).length;
+            if (numCount > 1) continue;
+
+            if (!supplierName && !isLikelyMedicineText(rowText) && rowText.length <= 60) {
+              if (/medicals|pharma|drugs|distributor|agencies|agency|chemists|laboratories|enterprises|aushadhalay|trading/i.test(rowText) && 
+                  !/gst\s*invoice|original\s*for\s*buyer|tax\s*invoice/i.test(rowText)) {
+                supplierName = rowText.split(/[,•|]/)[0].trim();
+              }
+            }
+
+            if (!invoiceNo) {
+              const invMatch = rowText.match(/(?:Invoice\s*No|Inv\s*No|Bill\s*No|Invoice\s*#|Inv\s*#)\s*[:.\s-]*([A-Za-z0-9\/-]+)/i);
+              if (invMatch) invoiceNo = invMatch[1].trim();
+            }
+
+            if (!invoiceDate) {
+              const dtMatch = rowText.match(/(?:Date|Dated|Dt)\s*[:.\s-]*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})/i);
+              if (dtMatch) {
+                const rawDt = dtMatch[1].trim();
+                const p = rawDt.split(/[-/.]/);
+                if (p.length === 3) {
+                  const yr = p[2].length === 2 ? `20${p[2]}` : p[2];
+                  invoiceDate = `${yr}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
+                } else {
+                  invoiceDate = rawDt;
+                }
+              }
+            }
+          }
+        }
+
+        supplierName = sanitizePartyName(supplierName, 'Om Sai Agency');
 
         // 4. Parse Data Rows
         const medicines = [];
@@ -495,7 +549,7 @@ export function parseExcelFile(file) {
           totalRows: sheetRows.length,
           errors,
           invoiceMeta: {
-            supplierName: supplierName || 'Pharma Supplier',
+            supplierName: sanitizePartyName(supplierName, 'Om Sai Agency'),
             invoiceNo: invoiceNo || `INV-${Date.now().toString().slice(-6)}`,
             invoiceDate: invoiceDate || new Date().toISOString().split('T')[0],
             grandTotal: grandTotal || medicines.reduce((sum, m) => sum + (m.stock * m.purchasePrice), 0),
@@ -571,8 +625,11 @@ export function parseInvoiceLines(lines) {
     const l = lines[i];
 
     if (!supplierName && !/gst\s*invoice|original\s*for\s*buyer|tax\s*invoice/i.test(l)) {
-      if (/medicals|pharma|drugs|agencies|distributors|chemists|laboratories/i.test(l)) {
-        supplierName = l.replace(/^GST\s*INVOICE\s*/i, '').trim();
+      if (/medicals|pharma|drugs|agencies|agency|distributors|distributor|chemists|laboratories|aushadhalay|trading/i.test(l)) {
+        const candidate = l.replace(/^GST\s*INVOICE\s*/i, '').trim();
+        if (!isLikelyMedicineText(candidate) && candidate.length <= 60) {
+          supplierName = candidate;
+        }
       }
     }
 
@@ -707,7 +764,7 @@ export function parseInvoiceLines(lines) {
     totalRows: lines.length,
     errors,
     invoiceMeta: {
-      supplierName: supplierName || 'Govind Medicals',
+      supplierName: sanitizePartyName(supplierName, 'Om Sai Agency'),
       invoiceNo: invoiceNo || `INV-${Date.now().toString().slice(-6)}`,
       invoiceDate: invoiceDate || new Date().toISOString().split('T')[0],
       grandTotal: grandTotal || medicines.reduce((s, m) => s + (m.stock * m.purchasePrice), 0),

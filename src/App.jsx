@@ -50,6 +50,7 @@ import { THEME_PRESETS, applyDashboardTheme } from './utils/themeUtils';
 import { getDaysUntilExpiry } from './utils/expiryUtils';
 import { playUrgentAlertSound, playSuccessSound } from './utils/notificationSound';
 import { sendMedicineExpiryNotification } from './utils/browserNotification';
+import { sanitizePartyName } from './utils/excelUtils';
 
 const AUDIO_KEY = 'medvault_audio_enabled_v1';
 const LANG_KEY = 'medvault_lang_pref_v1';
@@ -203,7 +204,11 @@ export default function App() {
             ? dbData.medicines.map(m => ({ ...m, userId: currentUser.id }))
             : [];
           const loadedVchs = Array.isArray(dbData.vouchers)
-            ? dbData.vouchers.map(v => ({ ...v, userId: currentUser.id }))
+            ? dbData.vouchers.map(v => ({ 
+                ...v, 
+                userId: currentUser.id,
+                partyName: sanitizePartyName(v.partyName, v.voucherType === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer')
+              }))
             : [];
 
           if (loadedMeds.length > 0 || !cachedMeds || cachedMeds.length === 0) {
@@ -485,7 +490,7 @@ export default function App() {
         voucherType: 'PURCHASE',
         voucherNo: invoiceMeta.invoiceNo || `PV-${Date.now().toString().slice(-6)}`,
         date: invoiceMeta.invoiceDate || new Date().toISOString().split('T')[0],
-        partyName: invoiceMeta.supplierName || 'Distributor Purchase',
+        partyName: sanitizePartyName(invoiceMeta.supplierName, 'Om Sai Agency'),
         partyPhone: '',
         invoiceRef: invoiceMeta.invoiceNo || '',
         paymentMode: 'Bank / Credit',
@@ -542,8 +547,10 @@ export default function App() {
   // CRUD Handlers for Vouchers (Strictly isolated by currentUser.id)
   const handleSaveVoucher = (voucherData) => {
     if (!currentUser?.id) return;
+    const cleanParty = sanitizePartyName(voucherData.partyName, voucherData.voucherType === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer');
     const voucherWithUser = {
       ...voucherData,
+      partyName: cleanParty,
       userId: currentUser.id,
     };
 
@@ -607,10 +614,10 @@ export default function App() {
               purchasePrice: vItem.rate || 25,
               mrp: vItem.mrp || (vItem.rate ? +(vItem.rate * 1.3).toFixed(2) : 35),
               rack: 'Rack A-1',
-              manufacturer: voucherWithUser.partyName || 'Pharma Supplier',
+              manufacturer: cleanParty,
               schedule: 'OTC',
               minStock: 10,
-              distributor: voucherWithUser.partyName || 'Direct Purchase',
+              distributor: cleanParty,
               status: 'active',
             };
             updatedMeds.unshift(newMed);
@@ -620,6 +627,22 @@ export default function App() {
       });
     }
 
+    playSuccessSound();
+  };
+
+  const handleUpdatePartyName = (voucherId, newPartyName) => {
+    const cleanName = sanitizePartyName(newPartyName, 'Om Sai Agency');
+    setVouchers((prev) => {
+      const updated = prev.map((v) => v.id === voucherId ? { ...v, partyName: cleanName } : v);
+      if (currentUser?.id) {
+        saveUserVouchers(currentUser.id, updated);
+        const target = updated.find((v) => v.id === voucherId);
+        if (target) {
+          apiSaveVoucher(currentUser.id, target).catch(() => {});
+        }
+      }
+      return updated;
+    });
     playSuccessSound();
   };
 
@@ -805,6 +828,7 @@ export default function App() {
               onOpenImportModal={() => setIsExcelModalOpen(true)}
               onEditVoucher={handleEditVoucher}
               onDeleteVoucher={handleDeleteVoucher}
+              onUpdatePartyName={handleUpdatePartyName}
               storeProfile={storeProfile}
               lang={lang}
             />

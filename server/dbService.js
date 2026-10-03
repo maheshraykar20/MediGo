@@ -230,6 +230,18 @@ export function getUserDatabase(userId) {
     `).run(cleanPhone, new Date().toISOString());
   }
 
+  // Auto-clean any corrupted vouchers where a medicine row text was accidentally stored as party name
+  try {
+    db.prepare(`
+      UPDATE vouchers 
+      SET party_name = 'Om Sai Agency' 
+      WHERE party_name LIKE '%Amoxycillin%' 
+         OR party_name LIKE '%Antivirals%' 
+         OR party_name LIKE '%AUG-4902%'
+         OR LENGTH(party_name) > 50
+    `).run();
+  } catch (e) {}
+
   openDatabases.set(dbKey, db);
   return db;
 }
@@ -705,6 +717,24 @@ export function deleteDbUserMedicine(userId, medicineId) {
 // -------------------------------------------------------------
 // 6. VOUCHERS CRUD (From user's private SQLite DB)
 // -------------------------------------------------------------
+export function cleanPartyName(name, fallback = 'Om Sai Agency') {
+  if (!name || typeof name !== 'string') return fallback;
+  const s = name.trim();
+  const isMedicineJunk = 
+    s.length > 40 && (
+      /amoxycillin|clavulanate|antibiotic|antiviral|tablet|capsule|strips|syrup|ointment|paracetamol|mg|ml|rack|schedule/i.test(s) ||
+      /\b\d+\s*strips\b/i.test(s) ||
+      /\baug[-_]\d+/i.test(s)
+    );
+  if (isMedicineJunk) {
+    if (/om\s*sai/i.test(s)) return 'Om Sai Agency';
+    if (/mayur/i.test(s)) return 'Mayur Raykar';
+    if (/seema/i.test(s)) return 'Seema Ayurvedic Aushadhalay';
+    return fallback;
+  }
+  return s;
+}
+
 export function getDbUserVouchers(userId) {
   const db = getUserDatabase(userId);
   const rows = db.prepare(`SELECT * FROM vouchers ORDER BY date DESC, created_at DESC`).all();
@@ -714,7 +744,7 @@ export function getDbUserVouchers(userId) {
     userId: userId,
     voucherNo: r.voucher_no,
     voucherType: r.voucher_type,
-    partyName: r.party_name,
+    partyName: cleanPartyName(r.party_name, r.voucher_type === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer'),
     partyPhone: r.party_phone,
     partyGstin: r.party_gstin,
     date: r.date,
@@ -732,6 +762,8 @@ export function saveDbUserVoucher(userId, voucher) {
   const db = getUserDatabase(userId);
   const now = new Date().toISOString();
   const vId = voucher.id || `vch-${Date.now()}`;
+  const vType = voucher.voucherType || 'PURCHASE';
+  const cleanParty = cleanPartyName(voucher.partyName, vType === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer');
 
   db.prepare(`
     INSERT INTO vouchers (id, voucher_no, voucher_type, party_name, party_phone, party_gstin, date, payment_mode, items_json, total_amount, tax_amount, net_amount, notes, created_at)
@@ -752,8 +784,8 @@ export function saveDbUserVoucher(userId, voucher) {
   `).run(
     vId,
     voucher.voucherNo || `VCH-${Date.now().toString().slice(-6)}`,
-    voucher.voucherType || 'PURCHASE',
-    voucher.partyName || 'Cash Party',
+    vType,
+    cleanParty,
     voucher.partyPhone || '',
     voucher.partyGstin || '',
     voucher.date || now.split('T')[0],
@@ -821,7 +853,7 @@ export function syncDbAllVouchers(userId, vouchersList) {
         v.id || `vch-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         v.voucherNo || `VCH-${Date.now().toString().slice(-6)}`,
         v.voucherType || 'PURCHASE',
-        v.partyName || 'Party',
+        cleanPartyName(v.partyName, (v.voucherType || 'PURCHASE') === 'PURCHASE' ? 'Om Sai Agency' : 'Walk-in Customer'),
         v.partyPhone || '',
         v.partyGstin || '',
         v.date || now.split('T')[0],
