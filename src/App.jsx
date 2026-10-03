@@ -290,11 +290,17 @@ export default function App() {
   const handleLoginSuccess = (user) => {
     isDataLoadedRef.current = false;
     activeUserIdRef.current = user.id;
-    // Wipe previous in-memory state so no previous user's data lingers
-    setMedicines([]);
-    setVouchers([]);
-    setStoreProfile(DEFAULT_PROFILE);
-    setCustomCategories([]);
+
+    // Immediately load existing saved data for this user so they see it instantly without blank screen
+    const existingMeds = getUserInventory(user.id);
+    const existingVchs = getUserVouchers(user.id);
+    const existingProf = getUserProfile(user.id, DEFAULT_PROFILE);
+    const existingCats = getUserCategories(user.id);
+
+    setMedicines(existingMeds);
+    setVouchers(existingVchs);
+    setStoreProfile(existingProf);
+    setCustomCategories(existingCats);
     setCurrentUserState(user);
     setIsLoginModalOpen(false);
     setActiveView('dashboard');

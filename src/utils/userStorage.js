@@ -33,11 +33,20 @@ const CLEAN_MARKER_KEY = 'medvault_v3_blank_slate_marker';
   }
 })();
 
-// Returns currently logged in session user, or null if fresh link visit
+// Returns currently logged in session user, persistent across browser tabs and refreshes
 export function getCurrentUser() {
   try {
-    const raw = sessionStorage.getItem(SESSION_USER_KEY);
-    if (raw) return JSON.parse(raw);
+    const sessionRaw = sessionStorage.getItem(SESSION_USER_KEY);
+    if (sessionRaw) return JSON.parse(sessionRaw);
+
+    const localRaw = localStorage.getItem(CURRENT_USER_KEY);
+    if (localRaw) {
+      const user = JSON.parse(localRaw);
+      if (user && user.id) {
+        try { sessionStorage.setItem(SESSION_USER_KEY, localRaw); } catch {}
+        return user;
+      }
+    }
   } catch (e) {
     console.error('Failed to get current user:', e);
   }
@@ -228,10 +237,31 @@ export function getUserInventory(userId) {
     const raw = localStorage.getItem(key);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch (e) {
     console.error('Failed to load user inventory:', e);
+  }
+
+  // Fallback: If current phone has 0 items in localStorage, check if any previous inventory exists
+  // on this browser (e.g. if the user previously entered data under 9579217810 or 7709022842)
+  try {
+    const allKeys = Object.keys(localStorage);
+    const invKeys = allKeys.filter(k => k.startsWith('medvault_inventory_usr_') && k !== key);
+    for (const otherKey of invKeys) {
+      const rawOther = localStorage.getItem(otherKey);
+      if (rawOther) {
+        const parsedOther = JSON.parse(rawOther);
+        if (Array.isArray(parsedOther) && parsedOther.length > 0) {
+          const migrated = parsedOther.map(m => ({ ...m, userId }));
+          try { localStorage.setItem(key, JSON.stringify(migrated)); } catch {}
+          api.apiSyncInventory(userId, migrated, false).catch(() => {});
+          return migrated;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Fallback inventory search error:', e);
   }
 
   // Fresh user starts with 100% BLANK inventory!
@@ -261,11 +291,29 @@ export function getUserVouchers(userId) {
     const raw = localStorage.getItem(key);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch (e) {
     console.error('Failed to load user vouchers:', e);
   }
+
+  // Fallback: check if vouchers exist under another key on this device
+  try {
+    const allKeys = Object.keys(localStorage);
+    const vchKeys = allKeys.filter(k => k.startsWith('medvault_vouchers_usr_') && k !== key);
+    for (const otherKey of vchKeys) {
+      const rawOther = localStorage.getItem(otherKey);
+      if (rawOther) {
+        const parsedOther = JSON.parse(rawOther);
+        if (Array.isArray(parsedOther) && parsedOther.length > 0) {
+          const migrated = parsedOther.map(v => ({ ...v, userId }));
+          try { localStorage.setItem(key, JSON.stringify(migrated)); } catch {}
+          api.apiSyncVouchers(userId, migrated).catch(() => {});
+          return migrated;
+        }
+      }
+    }
+  } catch (e) {}
 
   // Fresh user starts with 100% BLANK vouchers!
   return [];

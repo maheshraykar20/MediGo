@@ -302,6 +302,11 @@ export function createOtpSession(phone, customName = '', customStoreName = '', c
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(cleanPhone, otpCode, expiresAt, customName || '', customStoreName || '', new Date().toISOString());
 
+  // Clear any past deleted_stores record so the store is fully accessible
+  try {
+    central.prepare(`DELETE FROM deleted_stores WHERE phone = ?`).run(cleanPhone);
+  } catch {}
+
   // Proactively register user and store into central registry
   ensureUserInCentralRegistry(cleanPhone, customStoreName, customName);
 
@@ -316,6 +321,11 @@ export function createOtpSession(phone, customName = '', customStoreName = '', c
 export function verifyOtpAndGetUser(phone, code) {
   const cleanPhone = phone.replace(/[^0-9]/g, '').slice(-10);
   const central = getCentralDb();
+
+  // Clear any past deleted_stores record upon successful re-login
+  try {
+    central.prepare(`DELETE FROM deleted_stores WHERE phone = ?`).run(cleanPhone);
+  } catch {}
 
   const session = central.prepare(`
     SELECT * FROM otp_sessions WHERE phone = ?

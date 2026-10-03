@@ -8,6 +8,4 @@ yarn-error.log*
 .DS_Store
 *.log
 
-# Database files (Dynamic on server)
-data/databases/*.sqlite
-!data/databases/.gitkeep
+

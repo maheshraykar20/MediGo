@@ -13,159 +13,112 @@ if (typeof window !== 'undefined' && pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
 export function downloadSampleTemplate(lang = 'en') {
   const isMr = lang === 'mr';
 
-  const sampleDataEn = [
+  // Exact pharma bill columns from client invoice
+  const sampleData = [
     {
-      'Medicine Name': 'Dolo 650 Tablet',
-      'Composition / Salt': 'Paracetamol 650mg',
-      'Category': 'Tablets & Capsules',
-      'Batch Number': 'DL-8821',
-      'Expiry Date (YYYY-MM-DD)': '2026-09-29',
-      'Stock Quantity': 45,
-      'Unit': 'Strips',
-      'Purchase Price': 24.50,
+      'Mfg.': 'ZAND',
+      'HSN': '30049011',
+      'Product Name': 'ZANDU NITYAM CHURNA-(NO EXP)',
+      'Pack': '50GM',
+      'Qty': 1,
+      'Scm': 0,
+      'Batch': 'BT-4011',
+      'Exp': 'NO EXP',
+      'MRP': 51.56,
+      'Rate': 40.92,
+      'Disc': 0.00,
+      'Taxable': 40.92,
+      '% GST': '5.00%',
+      'Amt': 2.04,
+    },
+    {
+      'Mfg.': 'ZYDU',
+      'HSN': '30049029',
+      'Product Name': 'RINGOZONE OINTMENT (NO EXP)',
+      'Pack': '13GM',
+      'Qty': 3,
+      'Scm': 0,
+      'Batch': '4143',
+      'Exp': '6/29',
+      'MRP': 42.00,
+      'Rate': 34.96,
+      'Disc': 0.00,
+      'Taxable': 104.88,
+      '% GST': '5.00%',
+      'Amt': 5.24,
+    },
+    {
+      'Mfg.': 'CIPLA',
+      'HSN': '30049010',
+      'Product Name': 'DOLO 650 TABLET',
+      'Pack': "15'S",
+      'Qty': 10,
+      'Scm': 0,
+      'Batch': 'DL-8821',
+      'Exp': '12/28',
       'MRP': 33.60,
-      'Rack Location': 'Rack A-2',
-      'Manufacturer / Company': 'Micro Labs',
-      'Schedule Type': 'OTC',
+      'Rate': 24.50,
+      'Disc': 0.00,
+      'Taxable': 245.00,
+      '% GST': '12.00%',
+      'Amt': 29.40,
     },
     {
-      'Medicine Name': 'Augmentin 625 Duo',
-      'Composition / Salt': 'Amoxycillin & Potassium Clavulanate',
-      'Category': 'Antibiotics & Antivirals',
-      'Batch Number': 'AUG-4902',
-      'Expiry Date (YYYY-MM-DD)': '2026-10-05',
-      'Stock Quantity': 25,
-      'Unit': 'Strips',
-      'Purchase Price': 148.00,
+      'Mfg.': 'GSK',
+      'HSN': '30049020',
+      'Product Name': 'AUGMENTIN 625 DUO',
+      'Pack': "10'S",
+      'Qty': 5,
+      'Scm': 0,
+      'Batch': 'AG-4902',
+      'Exp': '10/27',
       'MRP': 201.50,
-      'Rack Location': 'Rack C-1',
-      'Manufacturer / Company': 'GSK Pharma',
-      'Schedule Type': 'Schedule H',
+      'Rate': 148.00,
+      'Disc': 0.00,
+      'Taxable': 740.00,
+      '% GST': '12.00%',
+      'Amt': 88.80,
     },
     {
-      'Medicine Name': 'Ascoril LS Syrup',
-      'Composition / Salt': 'Levosalbutamol, Ambroxol & Guaiphenesin',
-      'Category': 'Syrups & Suspensions',
-      'Batch Number': 'ASC-1099',
-      'Expiry Date (YYYY-MM-DD)': '2026-11-15',
-      'Stock Quantity': 18,
-      'Unit': 'Bottles',
-      'Purchase Price': 85.00,
-      'MRP': 118.00,
-      'Rack Location': 'Rack B-4',
-      'Manufacturer / Company': 'Glenmark',
-      'Schedule Type': 'OTC',
-    },
-    {
-      'Medicine Name': 'Pantocid 40 Tablet',
-      'Composition / Salt': 'Pantoprazole 40mg',
-      'Category': 'Tablets & Capsules',
-      'Batch Number': 'PAN-7731',
-      'Expiry Date (YYYY-MM-DD)': '2027-04-30',
-      'Stock Quantity': 60,
-      'Unit': 'Strips',
-      'Purchase Price': 98.00,
+      'Mfg.': 'SUN',
+      'HSN': '30049030',
+      'Product Name': 'PANTOCID 40 TABLET',
+      'Pack': "10'S",
+      'Qty': 12,
+      'Scm': 0,
+      'Batch': 'PT-7731',
+      'Exp': '04/29',
       'MRP': 145.00,
-      'Rack Location': 'Rack A-5',
-      'Manufacturer / Company': 'Sun Pharma',
-      'Schedule Type': 'OTC',
-    },
-    {
-      'Medicine Name': 'Betadine 10% Ointment',
-      'Composition / Salt': 'Povidone Iodine 10% w/w',
-      'Category': 'Ointments, Creams & Gels',
-      'Batch Number': 'BET-3321',
-      'Expiry Date (YYYY-MM-DD)': '2026-09-25',
-      'Stock Quantity': 12,
-      'Unit': 'Tubes',
-      'Purchase Price': 72.00,
-      'MRP': 99.00,
-      'Rack Location': 'Rack D-2',
-      'Manufacturer / Company': 'Win-Medicare',
-      'Schedule Type': 'OTC',
+      'Rate': 98.00,
+      'Disc': 0.00,
+      'Taxable': 1176.00,
+      '% GST': '12.00%',
+      'Amt': 141.12,
     },
   ];
 
-  const sampleDataMr = [
-    {
-      'औषधाचे नाव': 'Dolo 650 Tablet',
-      'रासायनिक घटक': 'Paracetamol 650mg',
-      'प्रकार': 'Tablets & Capsules',
-      'बॅच नंबर': 'DL-8821',
-      'मुदत तारीख (YYYY-MM-DD)': '2026-09-29',
-      'उपलब्ध साठा': 45,
-      'युनिट': 'Strips',
-      'खरेदी किंमत': 24.50,
-      'विक्री किंमत (MRP)': 33.60,
-      'रॅक / जागा': 'Rack A-2',
-      'कंपनी नाव': 'Micro Labs',
-      'शेड्युल': 'OTC',
-    },
-    {
-      'औषधाचे नाव': 'Augmentin 625 Duo',
-      'रासायनिक घटक': 'Amoxycillin & Potassium Clavulanate',
-      'प्रकार': 'Antibiotics & Antivirals',
-      'बॅच नंबर': 'AUG-4902',
-      'मुदत तारीख (YYYY-MM-DD)': '2026-10-05',
-      'उपलब्ध साठा': 25,
-      'युनिट': 'Strips',
-      'खरेदी किंमत': 148.00,
-      'विक्री किंमत (MRP)': 201.50,
-      'रॅक / जागा': 'Rack C-1',
-      'कंपनी नाव': 'GSK Pharma',
-      'शेड्युल': 'Schedule H',
-    },
-    {
-      'औषधाचे नाव': 'Ascoril LS Syrup',
-      'रासायनिक घटक': 'Levosalbutamol, Ambroxol & Guaiphenesin',
-      'प्रकार': 'Syrups & Suspensions',
-      'बॅच नंबर': 'ASC-1099',
-      'मुदत तारीख (YYYY-MM-DD)': '2026-11-15',
-      'उपलब्ध साठा': 18,
-      'युनिट': 'Bottles',
-      'खरेदी किंमत': 85.00,
-      'विक्री किंमत (MRP)': 118.00,
-      'रॅक / जागा': 'Rack B-4',
-      'कंपनी नाव': 'Glenmark',
-      'शेड्युल': 'OTC',
-    },
-    {
-      'औषधाचे नाव': 'Pantocid 40 Tablet',
-      'रासायनिक घटक': 'Pantoprazole 40mg',
-      'प्रकार': 'Tablets & Capsules',
-      'बॅच नंबर': 'PAN-7731',
-      'मुदत तारीख (YYYY-MM-DD)': '2027-04-30',
-      'उपलब्ध साठा': 60,
-      'युनिट': 'Strips',
-      'खरेदी किंमत': 98.00,
-      'विक्री किंमत (MRP)': 145.00,
-      'रॅक / जागा': 'Rack A-5',
-      'कंपनी नाव': 'Sun Pharma',
-      'शेड्युल': 'OTC',
-    },
-  ];
-
-  const dataToExport = isMr ? sampleDataMr : sampleDataEn;
-  const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+  const worksheet = XLSX.utils.json_to_sheet(sampleData);
 
   worksheet['!cols'] = [
-    { wch: 25 },
-    { wch: 35 },
-    { wch: 25 },
-    { wch: 16 },
-    { wch: 25 },
-    { wch: 15 },
-    { wch: 10 },
-    { wch: 16 },
-    { wch: 14 },
-    { wch: 16 },
-    { wch: 25 },
-    { wch: 15 },
+    { wch: 10 }, // Mfg.
+    { wch: 14 }, // HSN
+    { wch: 34 }, // Product Name
+    { wch: 10 }, // Pack
+    { wch: 8 },  // Qty
+    { wch: 8 },  // Scm
+    { wch: 14 }, // Batch
+    { wch: 12 }, // Exp
+    { wch: 10 }, // MRP
+    { wch: 10 }, // Rate
+    { wch: 8 },  // Disc
+    { wch: 12 }, // Taxable
+    { wch: 10 }, // % GST
+    { wch: 10 }, // Amt
   ];
 
   const workbook = XLSX.utils.book_new();
-  const sheetName = isMr ? 'नमुना_औषध_साठा' : 'Medicine_Stock_Template';
-  const fileName = isMr ? 'औषध_साठा_नमुना_शीट.xlsx' : 'Pharmacy_Medicine_Stock_Template.xlsx';
+  const sheetName = 'Pharma_Invoice';
+  const fileName = isMr ? 'फार्मा_बिल_इनव्हॉईस_फॉरमॅट.xlsx' : 'Pharma_Invoice_Bill_Template.xlsx';
 
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
   XLSX.writeFile(workbook, fileName);
@@ -176,6 +129,11 @@ export function downloadSampleTemplate(lang = 'en') {
  */
 export function parseIndianPharmaExpiry(val) {
   if (!val) return '2027-12-31';
+
+  const clean = String(val).trim();
+  if (/no\s*exp/i.test(clean)) {
+    return '2035-12-31';
+  }
 
   if (val instanceof Date) {
     if (isNaN(val.getTime())) return '2027-12-31';
@@ -193,9 +151,7 @@ export function parseIndianPharmaExpiry(val) {
     }
   }
 
-  const clean = String(val).trim();
-
-  // 1. M/YY or MM/YY (e.g. 4/27 -> 2027-04-30, 11/25 -> 2025-11-30)
+  // 1. M/YY or MM/YY (e.g. 4/27 -> 2027-04-30, 11/25 -> 2025-11-30, 6/29 -> 2029-06-30)
   const myMatch = clean.match(/^(\d{1,2})[-/](\d{2})$/);
   if (myMatch) {
     const month = parseInt(myMatch[1], 10);
@@ -377,8 +333,23 @@ export function parseExcelFile(file) {
             }
             // HSN
             else if (s === 'hsn' || s === 'hsncode') {
-              score += 1;
+              score += 2;
               currentMap.hsn = cIdx;
+            }
+            // Discount %
+            else if (s === 'disc' || s.includes('discount')) {
+              score += 1;
+              currentMap.disc = cIdx;
+            }
+            // Taxable Amount
+            else if (s === 'taxable' || s.includes('taxableamt') || s.includes('taxable')) {
+              score += 1;
+              currentMap.taxable = cIdx;
+            }
+            // % GST / GST Rate
+            else if (s.includes('gst') || s.includes('tax%')) {
+              score += 1;
+              currentMap.gst = cIdx;
             }
           });
 
@@ -474,6 +445,22 @@ export function parseExcelFile(file) {
           const rawMfg = colMap.mfg !== undefined ? row[colMap.mfg] : '';
           const manufacturer = String(rawMfg || '').trim() || supplierName || 'General Pharma';
 
+          // HSN Code
+          const rawHsn = colMap.hsn !== undefined ? row[colMap.hsn] : '';
+          const hsn = String(rawHsn || '').trim();
+
+          // Discount %
+          const rawDisc = colMap.disc !== undefined ? row[colMap.disc] : 0;
+          const discount = parseFloat(String(rawDisc).replace(/[^0-9.]/g, '')) || 0;
+
+          // Taxable Amount
+          const rawTaxable = colMap.taxable !== undefined ? row[colMap.taxable] : 0;
+          const taxableAmt = parseFloat(String(rawTaxable).replace(/[^0-9.]/g, '')) || 0;
+
+          // % GST
+          const rawGst = colMap.gst !== undefined ? row[colMap.gst] : 0;
+          const gstPercent = parseFloat(String(rawGst).replace(/[^0-9.]/g, '')) || 5;
+
           medicines.push({
             id: `med-${Date.now()}-${r}-${Math.random().toString(36).substr(2, 5)}`,
             name,
@@ -491,6 +478,10 @@ export function parseExcelFile(file) {
             minStock: 10,
             status: 'active',
             distributor: supplierName || 'Pharma Distributor',
+            hsn,
+            discount,
+            taxableAmt,
+            gstPercent,
             addedAt: new Date().toISOString(),
           });
         }
