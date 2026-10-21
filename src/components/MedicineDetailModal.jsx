@@ -121,6 +121,11 @@ export default function MedicineDetailModal({
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
               <div className="text-[10px] text-slate-500 font-bold uppercase">{isMr ? 'बॅच नंबर' : 'Batch No.'}</div>
               <div className="font-mono font-bold text-slate-900 text-sm mt-0.5">{medicine.batchNo}</div>
+              {medicine.barcode && (
+                <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate">
+                  Bar: {medicine.barcode}
+                </div>
+              )}
             </div>
 
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">

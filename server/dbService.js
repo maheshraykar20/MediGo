@@ -175,6 +175,7 @@ export function getUserDatabase(userId) {
       schedule TEXT DEFAULT 'OTC',
       min_stock INTEGER DEFAULT 10,
       status TEXT DEFAULT 'active',
+      barcode TEXT DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -249,6 +250,11 @@ export function getUserDatabase(userId) {
       SET payment_mode = 'Cash / Credit' 
       WHERE payment_mode = 'Bank / Credit' OR payment_mode = 'BANK' OR payment_mode = '' OR payment_mode IS NULL
     `).run();
+  } catch (e) {}
+
+  // Auto-migration: ensure barcode column exists in medicines
+  try {
+    db.prepare(`ALTER TABLE medicines ADD COLUMN barcode TEXT DEFAULT ''`).run();
   } catch (e) {}
 
   openDatabases.set(dbKey, db);
@@ -537,6 +543,7 @@ export function getDbUserInventory(userId) {
     composition: r.composition,
     category: r.category,
     batchNo: r.batch_no,
+    barcode: r.barcode || '',
     expiryDate: r.expiry_date,
     stock: r.stock,
     unit: r.unit,
@@ -560,8 +567,8 @@ export function saveDbUserMedicine(userId, med) {
   const medId = med.id || `med-${Date.now()}`;
 
   db.prepare(`
-    INSERT INTO medicines (id, name, composition, category, batch_no, expiry_date, stock, unit, purchase_price, mrp, rack, manufacturer, distributor, distributor_phone, schedule, min_stock, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO medicines (id, name, composition, category, batch_no, expiry_date, stock, unit, purchase_price, mrp, rack, manufacturer, distributor, distributor_phone, schedule, min_stock, status, barcode, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       composition = excluded.composition,
@@ -579,6 +586,7 @@ export function saveDbUserMedicine(userId, med) {
       schedule = excluded.schedule,
       min_stock = excluded.min_stock,
       status = excluded.status,
+      barcode = excluded.barcode,
       updated_at = excluded.updated_at;
   `).run(
     medId,
@@ -598,6 +606,7 @@ export function saveDbUserMedicine(userId, med) {
     med.schedule || 'OTC',
     parseInt(med.minStock, 10) || 10,
     med.status || 'active',
+    med.barcode || '',
     med.createdAt || now,
     now
   );
@@ -649,8 +658,8 @@ export function syncDbAllMedicines(userId, medicinesList, isBulkExcelImport = fa
     db.prepare('DELETE FROM medicines').run();
 
     const insertStmt = db.prepare(`
-      INSERT INTO medicines (id, name, composition, category, batch_no, expiry_date, stock, unit, purchase_price, mrp, rack, manufacturer, distributor, distributor_phone, schedule, min_stock, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO medicines (id, name, composition, category, batch_no, expiry_date, stock, unit, purchase_price, mrp, rack, manufacturer, distributor, distributor_phone, schedule, min_stock, status, barcode, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const med of medicinesList) {
@@ -672,6 +681,7 @@ export function syncDbAllMedicines(userId, medicinesList, isBulkExcelImport = fa
         med.schedule || 'OTC',
         parseInt(med.minStock, 10) || 10,
         med.status || 'active',
+        med.barcode || '',
         med.createdAt || now,
         now
       );

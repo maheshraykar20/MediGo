@@ -17,6 +17,7 @@ import LoginScreen from './components/LoginScreen';
 import VoucherView from './components/VoucherView';
 import VoucherEntryModal from './components/VoucherEntryModal';
 import LogoutConfirmModal from './components/LogoutConfirmModal';
+import BarcodeScannerModal from './components/BarcodeScannerModal';
 import AdminPortal from './admin/AdminPortal';
 import { 
   apiSaveMedicine, 
@@ -123,6 +124,7 @@ export default function App() {
   // 9. Modals State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingMedicine, setEditingMedicine] = useState(null);
+  const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
   const [isNotificationDrawerOpen, setIsNotificationDrawerOpen] = useState(false);
   const [selectedMedicine, setSelectedMedicine] = useState(null);
@@ -466,6 +468,28 @@ export default function App() {
     setIsAddModalOpen(true);
   };
 
+  const handleAddNewFromScanner = (scannedData) => {
+    setEditingMedicine({
+      name: '',
+      composition: '',
+      category: 'Tablets & Capsules',
+      batchNo: scannedData.batchNo || `BT-${Math.floor(1000 + Math.random() * 9000)}`,
+      barcode: scannedData.barcode || '',
+      expiryDate: scannedData.expiryDate || '',
+      stock: 20,
+      unit: 'Strips',
+      purchasePrice: '',
+      mrp: '',
+      rack: 'Rack A-1',
+      manufacturer: '',
+      distributor: '',
+      distributorPhone: '',
+      schedule: 'OTC',
+      minStock: 10,
+    });
+    setIsAddModalOpen(true);
+  };
+
   const handleSelectMedicine = (med) => {
     setSelectedMedicine(med);
     setIsDetailModalOpen(true);
@@ -709,6 +733,7 @@ export default function App() {
         onOpenProfileModal={() => setIsProfileModalOpen(true)}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         onOpenAdminPortal={() => setIsAdminViewOpen(true)}
+        onOpenScannerModal={() => setIsScannerModalOpen(true)}
         onLogout={handleRequestLogout}
         currentUser={currentUser}
         storeProfile={storeProfile}
@@ -734,6 +759,7 @@ export default function App() {
             setEditingVoucher(null);
             setIsVoucherModalOpen(true);
           }}
+          onOpenScannerModal={() => setIsScannerModalOpen(true)}
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           onOpenNotifications={() => setIsNotificationDrawerOpen(true)}
           onOpenProfileModal={() => setIsProfileModalOpen(true)}
@@ -785,6 +811,7 @@ export default function App() {
                   setIsAddModalOpen(true);
                 }}
                 onOpenExcelModal={() => setIsExcelModalOpen(true)}
+                onOpenScannerModal={() => setIsScannerModalOpen(true)}
                 onEditMedicine={handleEditMedicine}
                 onDeleteMedicine={handleDeleteMedicine}
                 onSelectMedicine={handleSelectMedicine}
@@ -809,6 +836,7 @@ export default function App() {
                 setIsAddModalOpen(true);
               }}
               onOpenExcelModal={() => setIsExcelModalOpen(true)}
+              onOpenScannerModal={() => setIsScannerModalOpen(true)}
               onEditMedicine={handleEditMedicine}
               onDeleteMedicine={handleDeleteMedicine}
               onSelectMedicine={handleSelectMedicine}
@@ -886,6 +914,7 @@ export default function App() {
           setEditingMedicine(null);
           setIsAddModalOpen(true);
         }}
+        onOpenScannerModal={() => setIsScannerModalOpen(true)}
         tomorrowCount={tomorrowMedicines.length}
         expiredCount={expiredMedicines.length}
         lang={lang}
@@ -926,6 +955,18 @@ export default function App() {
         customCategories={customCategories}
         onAddCategory={handleAddCategory}
         onDeleteCategory={handleDeleteCategory}
+        onOpenScanner={() => setIsScannerModalOpen(true)}
+        lang={lang}
+      />
+
+      {/* Barcode & QR Code Medicine Scanner Modal */}
+      <BarcodeScannerModal
+        isOpen={isScannerModalOpen}
+        onClose={() => setIsScannerModalOpen(false)}
+        medicines={userIsolatedMedicines}
+        onOpenMedicineDetail={handleSelectMedicine}
+        onEditMedicine={handleEditMedicine}
+        onAddNewWithData={handleAddNewFromScanner}
         lang={lang}
       />
 

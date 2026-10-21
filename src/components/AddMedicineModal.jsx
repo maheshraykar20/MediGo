@@ -12,7 +12,8 @@ import {
   AlertCircle,
   Clock,
   Sparkles,
-  Trash2
+  Trash2,
+  ScanLine
 } from 'lucide-react';
 import { CATEGORIES } from '../data/categories';
 import { getDaysUntilExpiry, getExpiryClassification } from '../utils/expiryUtils';
@@ -26,6 +27,7 @@ export default function AddMedicineModal({
   customCategories = [],
   onAddCategory,
   onDeleteCategory,
+  onOpenScanner,
   lang 
 }) {
   const isMr = lang === 'mr';
@@ -37,6 +39,7 @@ export default function AddMedicineModal({
     composition: '',
     category: 'Tablets & Capsules',
     batchNo: '',
+    barcode: '',
     expiryDate: '',
     stock: 20,
     unit: 'Strips',
@@ -56,6 +59,7 @@ export default function AddMedicineModal({
     if (editingMedicine) {
       setFormData({
         ...editingMedicine,
+        barcode: editingMedicine.barcode || '',
         purchasePrice: editingMedicine.purchasePrice || '',
         mrp: editingMedicine.mrp || '',
       });
@@ -67,6 +71,7 @@ export default function AddMedicineModal({
         composition: '',
         category: 'Tablets & Capsules',
         batchNo: `BT-${Math.floor(1000 + Math.random() * 9000)}`,
+        barcode: '',
         expiryDate: nextYear.toISOString().split('T')[0],
         stock: 30,
         unit: 'Strips',
@@ -386,9 +391,22 @@ export default function AddMedicineModal({
           <div className="p-3.5 rounded-xl bg-orange-50/50 border border-orange-200/80 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div>
-                <label className="block text-xs font-bold text-slate-800 mb-1">
-                  {isMr ? 'बॅच नंबर *' : 'Batch Number *'}
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-800">
+                    {isMr ? 'बॅच नंबर *' : 'Batch Number *'}
+                  </label>
+                  {onOpenScanner && (
+                    <button
+                      type="button"
+                      onClick={onOpenScanner}
+                      className="text-[10px] font-bold text-teal-700 hover:text-teal-900 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-1.5 py-0.5 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                      title={isMr ? 'स्ट्रिपवरील बारकोड / QR स्कॅन करा' : 'Scan strip barcode / QR'}
+                    >
+                      <ScanLine className="w-3 h-3 text-teal-600" />
+                      <span>{isMr ? '📷 स्कॅन करा' : '📷 Scan'}</span>
+                    </button>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={formData.batchNo}
@@ -420,6 +438,20 @@ export default function AddMedicineModal({
                 />
                 {errors.expiryDate && <span className="text-[11px] text-rose-600 mt-0.5 block">{errors.expiryDate}</span>}
               </div>
+            </div>
+
+            {/* Optional Barcode / GTIN */}
+            <div className="pt-0.5">
+              <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                {isMr ? 'बारकोड / QR कोड (Barcode / GTIN - ऐच्छिक)' : 'Barcode / QR Code (Optional)'}
+              </label>
+              <input
+                type="text"
+                value={formData.barcode || ''}
+                onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                placeholder={isMr ? 'उदा. 8901234567890 (स्कॅन किंवा टाईप करा)' : 'e.g. 8901234567890 (Scanned or typed)'}
+                className="w-full px-3 py-1.5 text-xs bg-white font-mono border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/30 transition"
+              />
             </div>
 
             {/* Quick Expiry Date Preset Buttons */}

@@ -14,7 +14,8 @@ import {
   UserCheck,
   Receipt,
   LogOut,
-  Palette
+  Palette,
+  ScanLine
 } from 'lucide-react';
 import { 
   isNotificationSupported, 
@@ -27,6 +28,7 @@ export default function Header({
   onOpenAddModal, 
   onOpenExcelModal, 
   onOpenVoucherModal,
+  onOpenScannerModal,
   onToggleSidebar, 
   onOpenNotifications,
   onOpenProfileModal,
@@ -165,6 +167,18 @@ export default function Header({
 
         {/* Right: Actions (Clean, Responsive, Mobile Optimized) */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          {/* Barcode & QR Scanner Quick Button */}
+          {onOpenScannerModal && (
+            <button
+              onClick={onOpenScannerModal}
+              className="p-1.5 sm:px-2.5 sm:py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold transition shadow-sm shadow-teal-600/30 flex items-center gap-1 cursor-pointer"
+              title={isMr ? 'औषधाचा बारकोड / QR स्कॅन करा' : 'Scan Medicine Barcode / QR'}
+            >
+              <ScanLine className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">{isMr ? 'स्कॅन' : 'Scan'}</span>
+            </button>
+          )}
+
           {/* Color Theme & Profile Quick Button */}
           <button
             onClick={onOpenProfileModal}

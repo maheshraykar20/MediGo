@@ -4,13 +4,15 @@ import {
   Pill, 
   AlertTriangle, 
   Receipt, 
-  Plus 
+  Plus,
+  ScanLine
 } from 'lucide-react';
 
 export default function MobileBottomNav({ 
   activeView, 
   setActiveView, 
   onOpenAddModal, 
+  onOpenScannerModal,
   tomorrowCount, 
   expiredCount, 
   lang 
@@ -47,14 +49,26 @@ export default function MobileBottomNav({
           </span>
         </button>
 
-        {/* Center Floating Add Button */}
-        <div className="-mt-5">
+        {/* Center Floating Actions: Scan & Add */}
+        <div className="-mt-5 flex items-center gap-1.5">
+          {onOpenScannerModal && (
+            <button
+              onClick={onOpenScannerModal}
+              className="w-11 h-11 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-lg shadow-emerald-600/40 hover:scale-105 active:scale-95 transition cursor-pointer"
+              aria-label={isMr ? 'औषध बारकोड स्कॅन करा' : 'Scan medicine barcode'}
+              title={isMr ? 'बारकोड / QR स्कॅनर' : 'Barcode / QR Scanner'}
+            >
+              <ScanLine className="w-5 h-5 stroke-[2.2]" />
+            </button>
+          )}
+
           <button
             onClick={onOpenAddModal}
-            className="w-12 h-12 rounded-full bg-gradient-to-tr from-teal-600 to-emerald-500 text-white flex items-center justify-center shadow-lg shadow-teal-600/40 hover:scale-105 active:scale-95 transition"
+            className="w-11 h-11 rounded-full bg-gradient-to-tr from-teal-600 to-cyan-600 text-white flex items-center justify-center shadow-lg shadow-teal-600/40 hover:scale-105 active:scale-95 transition cursor-pointer"
             aria-label={isMr ? 'नवीन औषध जोडा' : 'Add custom medicine'}
+            title={isMr ? 'नवीन औषध जोडा' : 'Add custom medicine'}
           >
-            <Plus className="w-6 h-6 stroke-[2.5]" />
+            <Plus className="w-5 h-5 stroke-[2.5]" />
           </button>
         </div>
 

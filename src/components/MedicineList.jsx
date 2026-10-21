@@ -17,7 +17,8 @@ import {
   Send,
   MoreVertical,
   Layers,
-  Sparkles
+  Sparkles,
+  ScanLine
 } from 'lucide-react';
 import { 
   getExpiryClassification, 
@@ -32,6 +33,7 @@ export default function MedicineList({
   medicines, 
   onOpenAddModal, 
   onOpenExcelModal, 
+  onOpenScannerModal,
   onEditMedicine, 
   onDeleteMedicine, 
   onSelectMedicine,
@@ -57,9 +59,10 @@ export default function MedicineList({
         const matchesName = m.name?.toLowerCase().includes(query);
         const matchesComp = m.composition?.toLowerCase().includes(query);
         const matchesBatch = m.batchNo?.toLowerCase().includes(query);
+        const matchesBarcode = m.barcode?.toLowerCase().includes(query);
         const matchesRack = m.rack?.toLowerCase().includes(query);
         const matchesMfr = m.manufacturer?.toLowerCase().includes(query);
-        if (!matchesName && !matchesComp && !matchesBatch && !matchesRack && !matchesMfr) {
+        if (!matchesName && !matchesComp && !matchesBatch && !matchesBarcode && !matchesRack && !matchesMfr) {
           return false;
         }
       }
@@ -140,20 +143,43 @@ export default function MedicineList({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={isMr ? 'औषधाचे नाव, बॅच, कंपोझिशन किंवा रॅक शोधा...' : 'Search medicine name, salt, batch, rack...'}
-              className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500 transition"
+              className="w-full pl-9 pr-9 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500 transition"
             />
-            {searchQuery && (
-              <button 
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 bg-slate-200 rounded-full w-4 h-4 flex items-center justify-center"
-              >
-                ×
-              </button>
-            )}
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {searchQuery ? (
+                <button 
+                  onClick={() => setSearchQuery('')}
+                  className="text-xs text-slate-400 hover:text-slate-600 bg-slate-200 rounded-full w-4 h-4 flex items-center justify-center cursor-pointer"
+                >
+                  ×
+                </button>
+              ) : onOpenScannerModal ? (
+                <button
+                  type="button"
+                  onClick={onOpenScannerModal}
+                  className="p-1 rounded-lg text-teal-600 hover:text-teal-800 hover:bg-teal-50 transition cursor-pointer"
+                  title={isMr ? 'बारकोड / QR स्कॅन करा' : 'Scan barcode or QR'}
+                >
+                  <ScanLine className="w-4 h-4" />
+                </button>
+              ) : null}
+            </div>
           </div>
 
-          {/* Action Buttons: Export, Download Sample, Add */}
+          {/* Action Buttons: Scan, Export, Download Sample, Add */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
+            {/* Scan Barcode / QR Button */}
+            {onOpenScannerModal && (
+              <button
+                type="button"
+                onClick={onOpenScannerModal}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-semibold shadow-sm transition shrink-0 cursor-pointer"
+                title={isMr ? 'औषधाचा बारकोड किंवा QR कोड स्कॅन करा' : 'Scan Medicine Barcode or QR Code'}
+              >
+                <ScanLine className="w-3.5 h-3.5" />
+                <span>{isMr ? 'स्कॅन' : 'Scan'}</span>
+              </button>
+            )}
             {/* Sort Dropdown */}
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
               <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />

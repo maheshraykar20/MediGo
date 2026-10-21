@@ -15,7 +15,8 @@ import {
   LogOut,
   UserCheck,
   Sparkles,
-  Database
+  Database,
+  ScanLine
 } from 'lucide-react';
 
 export default function Sidebar({ 
@@ -26,6 +27,7 @@ export default function Sidebar({
   onOpenProfileModal,
   onOpenLoginModal,
   onOpenAdminPortal,
+  onOpenScannerModal,
   onLogout,
   currentUser,
   storeProfile,
@@ -192,6 +194,26 @@ export default function Sidebar({
 
       {/* Navigation Items */}
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+        {/* Quick Barcode Scanner Button */}
+        {onOpenScannerModal && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenScannerModal();
+              if (onClose) onClose();
+            }}
+            className="w-full flex items-center justify-between px-3 py-2.5 rounded-2xl text-xs sm:text-sm font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-sm shadow-teal-600/30 transition cursor-pointer mb-2"
+          >
+            <div className="flex items-center gap-3">
+              <ScanLine className="w-4 h-4 text-white" />
+              <span>{isMr ? 'औषध बारकोड / QR स्कॅन' : 'Scan Barcode / QR'}</span>
+            </div>
+            <span className="px-1.5 py-0.2 bg-white/20 text-white text-[10px] rounded-full font-mono">
+              📷
+            </span>
+          </button>
+        )}
+
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeView === item.id;
