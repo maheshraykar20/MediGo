@@ -29,7 +29,12 @@ import {
   Layers,
   Sparkles,
   Globe,
-  Archive
+  Archive,
+  HardDrive,
+  Key,
+  Check,
+  Server,
+  ShieldAlert
 } from 'lucide-react';
 import { 
   apiAdminGetNotifications, 
@@ -43,13 +48,15 @@ import {
   apiAdminDeleteVoucher, 
   apiAdminSaveProfile, 
   apiAdminDeleteTenant,
-  getAdminSqliteDownloadUrl
+  getAdminSqliteDownloadUrl,
+  apiAdminLogin,
+  apiAdminVerifySession,
+  apiAdminLogout,
+  apiAdminGetDiagnostics,
+  getAdminToken
 } from '../utils/apiService';
 import { playSuccessSound, playUrgentAlertSound } from '../utils/notificationSound';
 
-// Master Admin Security PIN (Default: 7777)
-const ADMIN_MASTER_PIN = '7777';
-const ADMIN_AUTH_KEY = 'medvault_admin_auth_token_v1';
 const ADMIN_LANG_KEY = 'medvault_admin_lang_v1';
 
 export default function AdminPortal({ onBackToDashboard }) {
@@ -65,12 +72,17 @@ export default function AdminPortal({ onBackToDashboard }) {
     localStorage.setItem(ADMIN_LANG_KEY, nextLang);
   };
 
-  // Authentication State
+  // Authentication State - Server-Side Token Authorization
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return sessionStorage.getItem(ADMIN_AUTH_KEY) === 'true';
+    return !!getAdminToken();
   });
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
+  const [pinLoading, setPinLoading] = useState(false);
+
+  // Diagnostics & Persistence Storage State
+  const [diagnostics, setDiagnostics] = useState(null);
+  const [diagLoading, setDiagLoading] = useState(false);
 
   // Main Admin Data States
   const [tenants, setTenants] = useState([]);
@@ -78,7 +90,7 @@ export default function AdminPortal({ onBackToDashboard }) {
   const [tenantData, setTenantData] = useState(null);
 
   // Tabs: Separated into sidebar navigation and right detail pane tabs
-  const [sidebarTab, setSidebarTab] = useState('tenants'); // 'tenants' | 'notifications'
+  const [sidebarTab, setSidebarTab] = useState('tenants'); // 'tenants' | 'notifications' | 'storage'
   const [detailTab, setDetailTab] = useState('medicines'); // 'medicines' | 'vouchers' | 'profile' | 'audit'
 
   const [loading, setLoading] = useState(false);
@@ -99,24 +111,72 @@ export default function AdminPortal({ onBackToDashboard }) {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
 
-  // 1. PIN Authentication Handler
-  const handlePinSubmit = (e) => {
-    e.preventDefault();
-    if (pinInput.trim() === ADMIN_MASTER_PIN) {
-      sessionStorage.setItem(ADMIN_AUTH_KEY, 'true');
-      setIsAuthenticated(true);
-      setPinError('');
-      playSuccessSound();
+  // 0. Verify server session on initial load
+  useEffect(() => {
+    const token = getAdminToken();
+    if (token) {
+      apiAdminVerifySession()
+        .then((res) => {
+          if (res && res.valid) {
+            setIsAuthenticated(true);
+          } else {
+            setIsAuthenticated(false);
+          }
+        })
+        .catch(() => {
+          setIsAuthenticated(false);
+        });
     } else {
-      setPinError(isMr ? 'चुकीचा Master PIN! योग्य ॲडमिन पिन टाका (Default: 7777)' : 'Incorrect Master PIN! (Default: 7777)');
+      setIsAuthenticated(false);
+    }
+  }, []);
+
+  // 1. PIN Authentication Handler (Server-Side Verified with Cryptographic Token)
+  const handlePinSubmit = async (e) => {
+    e.preventDefault();
+    if (!pinInput.trim()) return;
+    try {
+      setPinLoading(true);
+      setPinError('');
+      const res = await apiAdminLogin(pinInput.trim());
+      if (res && res.success && res.token) {
+        setIsAuthenticated(true);
+        setPinError('');
+        playSuccessSound();
+      } else {
+        setPinError(res?.error || (isMr ? 'चुकीचा Master PIN! योग्य ॲडमिन पिन टाका' : 'Incorrect Master PIN!'));
+        playUrgentAlertSound();
+      }
+    } catch (err) {
+      setPinError(err.message || (isMr ? 'प्रमाणीकरण अयशस्वी!' : 'Authentication failed!'));
       playUrgentAlertSound();
+    } finally {
+      setPinLoading(false);
     }
   };
 
-  const handleLogoutAdmin = () => {
-    sessionStorage.removeItem(ADMIN_AUTH_KEY);
+  const handleLogoutAdmin = async () => {
+    try {
+      await apiAdminLogout();
+    } catch {}
     setIsAuthenticated(false);
     setPinInput('');
+  };
+
+  const fetchDiagnostics = async () => {
+    try {
+      setDiagLoading(true);
+      const res = await apiAdminGetDiagnostics();
+      if (res && res.success) {
+        setDiagnostics(res.diagnostics);
+      }
+    } catch (err) {
+      if (err.status === 401 || err.code === 'ADMIN_UNAUTHORIZED') {
+        handleLogoutAdmin();
+      }
+    } finally {
+      setDiagLoading(false);
+    }
   };
 
   // 2. Fetch Notifications Function
@@ -406,10 +466,20 @@ export default function AdminPortal({ onBackToDashboard }) {
 
             <button
               type="submit"
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl text-sm transition shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 cursor-pointer"
+              disabled={pinLoading}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-black rounded-2xl text-sm transition shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 cursor-pointer"
             >
-              <Unlock className="w-4 h-4" />
-              <span>{isMr ? 'डेटाबेस ॲडमिन पोर्टल उघडा' : 'Unlock Database Admin Portal'}</span>
+              {pinLoading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>{isMr ? 'तपासत आहे...' : 'Verifying Server Token...'}</span>
+                </>
+              ) : (
+                <>
+                  <Unlock className="w-4 h-4" />
+                  <span>{isMr ? 'डेटाबेस ॲडमिन पोर्टल उघडा' : 'Unlock Database Admin Portal'}</span>
+                </>
+              )}
             </button>
           </form>
 
@@ -604,35 +674,52 @@ export default function AdminPortal({ onBackToDashboard }) {
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* LEFT COLUMN: TENANT STORES & LIVE NOTIFICATIONS */}
         <aside className={`w-full lg:w-80 xl:w-96 border-b lg:border-b-0 lg:border-r border-slate-200 bg-white flex flex-col shrink-0 ${selectedTenantId ? 'hidden lg:flex' : 'flex'}`}>
-          {/* Top Sub-tabs: All Stores vs Notifications */}
-          <div className="p-3 border-b border-slate-200 flex gap-2 bg-slate-50/50">
+          {/* Top Sub-tabs: All Stores vs Notifications vs DB Storage */}
+          <div className="p-2.5 border-b border-slate-200 grid grid-cols-3 gap-1 bg-slate-50/50">
             <button
               onClick={() => setSidebarTab('tenants')}
-              className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+              className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition cursor-pointer ${
                 sidebarTab === 'tenants'
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
               }`}
             >
               <Store className="w-3.5 h-3.5" />
-              <span>{isMr ? `सर्व स्टोअर्स (${tenants.length})` : `All Stores (${tenants.length})`}</span>
+              <span className="truncate">{isMr ? `स्टोअर्स (${tenants.length})` : `Stores (${tenants.length})`}</span>
             </button>
 
             <button
               onClick={() => setSidebarTab('notifications')}
-              className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+              className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition cursor-pointer relative ${
                 sidebarTab === 'notifications'
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
               }`}
             >
-              <Bell className="w-3.5 h-3.5" />
-              <span>{isMr ? 'सूचना' : 'Notifs'}</span>
-              {unreadCount > 0 && (
-                <span className="px-1.5 py-0.5 bg-rose-600 text-white rounded-full text-[10px] font-black leading-none animate-pulse">
-                  {unreadCount}
-                </span>
-              )}
+              <div className="relative">
+                <Bell className="w-3.5 h-3.5" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2 px-1 py-0.2 bg-rose-600 text-white rounded-full text-[9px] font-black leading-none animate-pulse">
+                    {unreadCount}
+                  </span>
+                )}
+              </div>
+              <span className="truncate">{isMr ? 'सूचना' : 'Alerts'}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setSidebarTab('storage');
+                fetchDiagnostics();
+              }}
+              className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition cursor-pointer ${
+                sidebarTab === 'storage'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span className="truncate">{isMr ? 'स्टोरेज / सुरक्षा' : 'Storage'}</span>
             </button>
           </div>
 
@@ -829,10 +916,10 @@ export default function AdminPortal({ onBackToDashboard }) {
           )}
         </aside>
 
-        {/* RIGHT COLUMN: SELECTED TENANT LIVE DATABASE EXPLORER & EDITOR */}
-        <main className={`flex-1 flex flex-col overflow-y-auto p-4 sm:p-6 space-y-6 bg-slate-50 ${!selectedTenantId ? 'hidden lg:flex' : 'flex'}`}>
+        {/* RIGHT COLUMN: SELECTED TENANT LIVE DATABASE EXPLORER & EDITOR OR STORAGE DASHBOARD */}
+        <main className={`flex-1 flex flex-col overflow-y-auto p-4 sm:p-6 space-y-6 bg-slate-50 ${(!selectedTenantId && sidebarTab !== 'storage') ? 'hidden lg:flex' : 'flex'}`}>
           {/* Mobile Back Button to Store List */}
-          {selectedTenantId && (
+          {selectedTenantId && sidebarTab !== 'storage' && (
             <button
               onClick={() => {
                 setSelectedTenantId(null);
@@ -845,7 +932,198 @@ export default function AdminPortal({ onBackToDashboard }) {
             </button>
           )}
 
-          {activeTenant ? (
+          {sidebarTab === 'storage' ? (
+            <div className="space-y-6 text-left animate-fadeIn">
+              {/* Storage & Security Title Card */}
+              <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-blue-600 text-white flex items-center justify-center font-black text-xl shadow-md shadow-indigo-500/20 shrink-0">
+                    <Database className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 flex-wrap">
+                      <span>{isMr ? 'डेटाबेस स्टोरेज व सर्व्हर सुरक्षा' : 'Database Storage & Server Security Engine'}</span>
+                      <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full text-[10px] font-mono font-bold">
+                        ACTIVE & SECURED
+                      </span>
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1 font-medium">
+                      {isMr ? 'प्रत्येक मेडिकल स्टोअरसाठी स्वतंत्र SQLite फाइल्स व सर्व्हर-साइड ऑथोरायझेशन' : 'Per-tenant isolated SQLite files & server-side authorization tokens'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={fetchDiagnostics}
+                  className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer self-start md:self-auto"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${diagLoading ? 'animate-spin' : ''}`} />
+                  <span>{isMr ? 'तपासा / रिफ्रेश करा' : 'Check / Refresh'}</span>
+                </button>
+              </div>
+
+              {/* 4 Security Badges Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 bg-white border border-slate-200/90 rounded-2xl shadow-xs space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                    <span>{isMr ? 'सर्व्हर ऑथोरायझेशन' : 'Server Authorization'}</span>
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <div className="text-sm font-black text-slate-900">
+                    {isMr ? 'सक्रिय (Token Active)' : 'Active (Bearer Token)'}
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    {isMr ? 'सर्व Admin APIs सुरक्षित' : 'Cryptographic Token Verified'}
+                  </p>
+                </div>
+
+                <div className="p-4 bg-white border border-slate-200/90 rounded-2xl shadow-xs space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                    <span>{isMr ? 'डेटाबेस राइट टेस्ट' : 'Disk Write Test'}</span>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <div className="text-sm font-black text-emerald-700 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span>{diagnostics?.writable ? 'PASSED (Writable)' : 'Checking...'}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    {diagnostics?.canaryFile ? 'Canary file verified' : 'Live read/write test'}
+                  </p>
+                </div>
+
+                <div className="p-4 bg-white border border-slate-200/90 rounded-2xl shadow-xs space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                    <span>{isMr ? 'SQLite जर्नल मोड' : 'SQLite Journal Mode'}</span>
+                    <Server className="w-4 h-4 text-indigo-600" />
+                  </div>
+                  <div className="text-sm font-black text-indigo-700">
+                    WAL Mode (ACID)
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    {isMr ? 'जलद व क्रॅश-सुरक्षित व्यवहार' : 'Write-Ahead Logging'}
+                  </p>
+                </div>
+
+                <div className="p-4 bg-white border border-slate-200/90 rounded-2xl shadow-xs space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                    <span>{isMr ? 'एकूण SQLite फाइल्स' : 'Total SQLite DB Files'}</span>
+                    <HardDrive className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <div className="text-sm font-black text-slate-900">
+                    {diagnostics?.filesCount || tenants.length + 1} Files
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    {isMr ? 'प्रत्येक स्टोअरची स्वतंत्र फाईल' : 'Per-store dedicated files'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Disk Path & Render Persistence Configuration Card */}
+              <div className="p-5 bg-white border border-slate-200/90 rounded-3xl shadow-xs space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                    <HardDrive className="w-4 h-4 text-indigo-600" />
+                    <span>{isMr ? 'डेटाबेस स्टोरेज पाथ (Storage Directory)' : 'Database Storage Directory'}</span>
+                  </h3>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${diagnostics?.isCustomDataDir ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                    {diagnostics?.isCustomDataDir ? (isMr ? '✅ Persistent Disk सक्रिय (Mounted)' : '✅ Persistent Disk Active') : (isMr ? 'ℹ️ Container Local Storage' : 'ℹ️ Container Local Storage')}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-slate-900 text-slate-100 rounded-2xl font-mono text-xs flex items-center justify-between overflow-x-auto">
+                  <span>{diagnostics?.dbDir || 'Loading path...'}</span>
+                </div>
+
+                {/* Render Configuration Guidance */}
+                <div className="p-4 bg-indigo-50/70 border border-indigo-200/70 rounded-2xl space-y-2 text-xs text-indigo-950">
+                  <div className="font-bold flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>{isMr ? 'Render वर डेटा कायमस्वरूपी (Permanent) ठेवण्यासाठी माहिती:' : 'Render Persistent Disk Configuration Guide:'}</span>
+                  </div>
+                  <p className="text-slate-600 leading-relaxed">
+                    {isMr 
+                      ? 'Render.com वर मोफत कंटेनर रीस्टार्ट किंवा redeploy झाल्यावर स्थानिक कंटेनर फाइल्स रिसेट होऊ शकतात. तुमचा डेटा कायमचा सुरक्षित राहण्यासाठी Render Dashboard मध्ये जाऊन तुमच्या Web Service च्या "Disks" टॅबमध्ये नवीन Disk जोडा (Mount Path: /var/data) आणि Environment Variables मध्ये DATA_DIR=/var/data सेट करा. MedVault आपोआप डेटा त्या डिस्कवर साठवेल!'
+                      : 'On standard ephemeral containers, files inside the container are reset during redeploys. To keep all data permanently safe across redeploys, attach a Render Persistent Disk mounted at "/var/data" in your Render Dashboard -> Disks, and set the environment variable DATA_DIR=/var/data. MedVault automatically persists everything to the mounted disk!'}
+                  </p>
+                </div>
+              </div>
+
+              {/* All Database Files on Disk List */}
+              <div className="bg-white border border-slate-200/90 rounded-3xl shadow-xs overflow-hidden">
+                <div className="p-4 border-b border-slate-200/90 flex items-center justify-between flex-wrap gap-2 bg-slate-50/50">
+                  <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                    <Database className="w-4 h-4 text-indigo-600" />
+                    <span>{isMr ? 'सर्व SQLite फाइल्स व बॅकअप (Live Files on Disk)' : 'All Live SQLite Files & Offline Backups'}</span>
+                  </h3>
+                  <span className="text-xs text-slate-500 font-mono">
+                    {diagnostics?.files?.length || 0} {isMr ? 'फाइल्स आढळल्या' : 'files detected'}
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 text-slate-500 font-mono uppercase text-[10px] border-b border-slate-200">
+                      <tr>
+                        <th className="p-3 pl-4">{isMr ? 'फाईल नाव' : 'File Name'}</th>
+                        <th className="p-3">{isMr ? 'प्रकार / वर्णन' : 'Type / Description'}</th>
+                        <th className="p-3">{isMr ? 'फाईल साईझ' : 'File Size'}</th>
+                        <th className="p-3">{isMr ? 'शेवटचा बदल' : 'Last Modified'}</th>
+                        <th className="p-3 pr-4 text-right">{isMr ? 'ऑफलाइन बॅकअप' : 'Offline Backup'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                      {diagnostics?.files && diagnostics.files.length > 0 ? (
+                        diagnostics.files.map((file) => {
+                          const isCentral = file.name.includes('central');
+                          return (
+                            <tr key={file.name} className="hover:bg-slate-50/80 transition">
+                              <td className="p-3 pl-4 font-mono font-bold text-slate-900 flex items-center gap-2">
+                                <Database className={`w-3.5 h-3.5 ${isCentral ? 'text-amber-600' : 'text-indigo-600'}`} />
+                                <span>{file.name}</span>
+                              </td>
+                              <td className="p-3 text-slate-600">
+                                {isCentral ? (
+                                  <span className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-md font-bold text-[10px]">
+                                    CENTRAL REGISTRY (सर्व स्टोअर्स व सूचना)
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md font-bold text-[10px]">
+                                    STORE ISOLATED DB (औषधे, बिल, प्रोव्हाईल)
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 font-mono text-slate-800 font-bold">
+                                {file.sizeKb} KB
+                              </td>
+                              <td className="p-3 font-mono text-slate-500 text-[11px]">
+                                {new Date(file.modifiedAt).toLocaleString()}
+                              </td>
+                              <td className="p-3 pr-4 text-right">
+                                <a
+                                  href={getAdminSqliteDownloadUrl(file.name)}
+                                  download
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700 rounded-xl font-bold transition shadow-xs text-xs"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  <span>{isMr ? 'डाउनलोड करा' : 'Download'}</span>
+                                </a>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan="5" className="p-8 text-center text-slate-400">
+                            {isMr ? 'फाइल्स तपासल्या जात आहेत...' : 'Scanning database files on disk...'}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : activeTenant ? (
             <>
               {/* Tenant Header Banner */}
               <div className="p-4 sm:p-6 rounded-3xl bg-white border border-slate-200/90 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 text-left">

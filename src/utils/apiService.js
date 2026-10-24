@@ -1,19 +1,56 @@
 // Client-side API service connecting Frontend to Real Multi-Tenant SQLite Database
 
 const API_BASE = '/api';
+const ADMIN_TOKEN_KEY = 'medvault_admin_token_v2';
+
+export function getAdminToken() {
+  try {
+    return sessionStorage.getItem(ADMIN_TOKEN_KEY) || localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setAdminToken(token) {
+  try {
+    if (token) {
+      sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
+      localStorage.setItem(ADMIN_TOKEN_KEY, token);
+    } else {
+      sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+      localStorage.removeItem(ADMIN_TOKEN_KEY);
+    }
+  } catch {}
+}
+
+export function clearAdminToken() {
+  setAdminToken('');
+}
 
 async function fetchJson(endpoint, options = {}) {
   try {
+    const token = getAdminToken();
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    };
+
+    // Attach Bearer token for server-side authorized requests
+    if (token && !headers['Authorization'] && !headers['authorization']) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch(`${API_BASE}${endpoint}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
+      headers,
       ...options,
     });
+
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || `HTTP error ${res.status}`);
+      const error = new Error(errBody.error || `HTTP error ${res.status}`);
+      error.status = res.status;
+      error.code = errBody.code;
+      throw error;
     }
     return await res.json();
   } catch (error) {
@@ -167,6 +204,40 @@ export async function apiGetTableData(userId, table = 'medicines') {
 }
 
 // -------------------------------------------------------------
+// SUPER ADMIN AUTHENTICATION & SECURITY
+// -------------------------------------------------------------
+export async function apiAdminLogin(pin) {
+  const result = await fetchJson('/admin/login', {
+    method: 'POST',
+    body: JSON.stringify({ pin }),
+  });
+  if (result && result.token) {
+    setAdminToken(result.token);
+  }
+  return result;
+}
+
+export async function apiAdminVerifySession() {
+  return fetchJson('/admin/verify-session');
+}
+
+export async function apiAdminLogout() {
+  try {
+    await fetchJson('/admin/logout', {
+      method: 'POST',
+    });
+  } catch (err) {
+    // Proceed with client logout even if network request fails
+  } finally {
+    clearAdminToken();
+  }
+}
+
+export async function apiAdminGetDiagnostics() {
+  return fetchJson('/admin/diagnostics');
+}
+
+// -------------------------------------------------------------
 // SUPER ADMIN NOTIFICATIONS & TENANT EDIT API
 // -------------------------------------------------------------
 export async function apiAdminGetNotifications(limit = 100, unreadOnly = false) {
@@ -234,7 +305,9 @@ export async function apiAdminDeleteTenant(userId) {
 }
 
 export function getAdminSqliteDownloadUrl(fileName) {
-  return `/api/admin/download-sqlite?file=${encodeURIComponent(fileName)}`;
+  const token = getAdminToken();
+  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+  return `/api/admin/download-sqlite?file=${encodeURIComponent(fileName)}${tokenParam}`;
 }
 
 export async function apiGetPublicStats() {

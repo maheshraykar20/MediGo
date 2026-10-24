@@ -1,6 +1,7 @@
 import url from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { 
   createOtpSession, 
   verifyOtpAndGetUser, 
@@ -33,8 +34,108 @@ import {
   adminSaveTenantProfile,
   adminDeleteTenantStore,
   getActiveStoresCount,
-  isStoreDeleted
+  isStoreDeleted,
+  DB_DIR,
+  verifyDatabasePersistence
 } from './dbService.js';
+
+// -------------------------------------------------------------
+// SERVER-SIDE ADMIN AUTHENTICATION & SECURITY (Addresses /admin route security)
+// -------------------------------------------------------------
+const ADMIN_MASTER_PIN = process.env.ADMIN_PIN || process.env.ADMIN_SECRET || '7777';
+
+// Active cryptographically random admin sessions (in-memory)
+// token -> { token, createdAt, expiresAt, ip }
+const activeAdminSessions = new Map();
+
+// Rate limiting: ip -> { count, lockedUntil }
+const adminLoginAttempts = new Map();
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return req.socket?.remoteAddress || '127.0.0.1';
+}
+
+function checkAdminRateLimit(ip) {
+  const record = adminLoginAttempts.get(ip);
+  if (!record) return { allowed: true };
+  if (record.lockedUntil && Date.now() < record.lockedUntil) {
+    const waitSec = Math.ceil((record.lockedUntil - Date.now()) / 1000);
+    return { 
+      allowed: false, 
+      message: `Too many failed attempts. Security lock active. Try again in ${waitSec} seconds.` 
+    };
+  }
+  if (record.lockedUntil && Date.now() >= record.lockedUntil) {
+    adminLoginAttempts.delete(ip);
+    return { allowed: true };
+  }
+  return { allowed: true };
+}
+
+function recordAdminFailedAttempt(ip) {
+  const record = adminLoginAttempts.get(ip) || { count: 0, lockedUntil: null };
+  record.count += 1;
+  if (record.count >= 5) {
+    record.lockedUntil = Date.now() + 15 * 60 * 1000; // 15 min lockout
+  }
+  adminLoginAttempts.set(ip, record);
+}
+
+function clearAdminRateLimit(ip) {
+  adminLoginAttempts.delete(ip);
+}
+
+function createAdminSession(ip) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+  activeAdminSessions.set(token, {
+    token,
+    createdAt: Date.now(),
+    expiresAt,
+    ip
+  });
+  return { token, expiresAt };
+}
+
+function verifyAdminSession(token) {
+  if (!token || typeof token !== 'string') return false;
+  const session = activeAdminSessions.get(token);
+  if (!session) return false;
+  if (Date.now() > session.expiresAt) {
+    activeAdminSessions.delete(token);
+    return false;
+  }
+  return true;
+}
+
+function extractAdminToken(req, query) {
+  const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7).trim();
+  }
+  if (req.headers['x-admin-token']) {
+    return req.headers['x-admin-token'].toString().trim();
+  }
+  if (query && query.token) {
+    return query.token.toString().trim();
+  }
+  return null;
+}
+
+function requireAdminAuth(req, res, query) {
+  const token = extractAdminToken(req, query);
+  if (!verifyAdminSession(token)) {
+    sendJson(res, 401, {
+      success: false,
+      error: 'Unauthorized: Admin authentication required. Please login with your Admin Master PIN.',
+      code: 'ADMIN_UNAUTHORIZED'
+    });
+    return false;
+  }
+  return true;
+}
 
 // Helper to parse JSON body from incoming HTTP request
 function parseJsonBody(req) {
@@ -348,15 +449,89 @@ export async function handleApiRequest(req, res) {
     }
 
     // ---------------------------------------------------------
-    // DATABASE INSPECTOR (For Live User Inspection of All SQLite DBs)
+    // ADMIN AUTHENTICATION & SESSION MANAGEMENT
     // ---------------------------------------------------------
+    if (pathname === '/api/admin/login' && req.method === 'POST') {
+      const ip = getClientIp(req);
+      const rateCheck = checkAdminRateLimit(ip);
+      if (!rateCheck.allowed) {
+        sendJson(res, 429, { success: false, error: rateCheck.message });
+        return true;
+      }
+
+      const body = await parseJsonBody(req);
+      const enteredPin = (body.pin || body.password || '').toString().trim();
+
+      if (enteredPin && enteredPin === ADMIN_MASTER_PIN) {
+        clearAdminRateLimit(ip);
+        const session = createAdminSession(ip);
+        sendJson(res, 200, {
+          success: true,
+          token: session.token,
+          expiresAt: session.expiresAt,
+          message: 'Admin authorization granted successfully'
+        });
+        return true;
+      }
+
+      recordAdminFailedAttempt(ip);
+      // Subtle delay to mitigate timing attacks & brute force
+      await new Promise(r => setTimeout(r, 600));
+      sendJson(res, 401, { 
+        success: false, 
+        error: 'Invalid Master PIN. Admin access denied.' 
+      });
+      return true;
+    }
+
+    if (pathname === '/api/admin/verify-session' && req.method === 'GET') {
+      const token = extractAdminToken(req, query);
+      const isValid = verifyAdminSession(token);
+      if (isValid) {
+        sendJson(res, 200, { success: true, valid: true });
+      } else {
+        sendJson(res, 401, { success: false, valid: false, error: 'Session expired or invalid' });
+      }
+      return true;
+    }
+
+    if (pathname === '/api/admin/logout' && req.method === 'POST') {
+      const token = extractAdminToken(req, query);
+      if (token) {
+        activeAdminSessions.delete(token);
+      }
+      sendJson(res, 200, { success: true, message: 'Logged out successfully' });
+      return true;
+    }
+
+    // ---------------------------------------------------------
+    // DATABASE INSPECTOR & DIAGNOSTICS (Server-Side Authorized)
+    // ---------------------------------------------------------
+    if (pathname === '/api/admin/diagnostics' && req.method === 'GET') {
+      if (!requireAdminAuth(req, res, query)) return true;
+      const persistenceData = verifyDatabasePersistence();
+      sendJson(res, 200, {
+        success: true,
+        diagnostics: {
+          ...persistenceData,
+          serverUptimeSeconds: Math.floor(process.uptime()),
+          nodeVersion: process.version,
+          activeAdminSessionsCount: activeAdminSessions.size,
+          environment: process.env.NODE_ENV || 'production'
+        }
+      });
+      return true;
+    }
+
     if (pathname === '/api/db/inspector' && req.method === 'GET') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const inspectorData = getDatabaseInspectorData();
       sendJson(res, 200, inspectorData);
       return true;
     }
 
     if (pathname === '/api/db/table-data' && req.method === 'GET') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const userId = query.userId;
       const table = query.table || 'medicines';
       if (!userId) {
@@ -378,9 +553,10 @@ export async function handleApiRequest(req, res) {
     }
 
     // ---------------------------------------------------------
-    // SUPER ADMIN EXCLUSIVE ROUTES
+    // SUPER ADMIN EXCLUSIVE ROUTES (Protected by Bearer Token)
     // ---------------------------------------------------------
     if (pathname === '/api/admin/notifications' && req.method === 'GET') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const limit = parseInt(query.limit, 10) || 100;
       const unreadOnly = query.unread === 'true';
       const data = getAdminNotifications(limit, unreadOnly);
@@ -389,6 +565,7 @@ export async function handleApiRequest(req, res) {
     }
 
     if (pathname === '/api/admin/notifications/mark-read' && req.method === 'POST') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const body = await parseJsonBody(req);
       const result = markAdminNotificationRead(body.id || 'all');
       sendJson(res, 200, result);
@@ -396,18 +573,21 @@ export async function handleApiRequest(req, res) {
     }
 
     if (pathname === '/api/admin/notifications/clear' && req.method === 'POST') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const result = clearAdminNotifications();
       sendJson(res, 200, result);
       return true;
     }
 
     if (pathname === '/api/admin/tenants' && req.method === 'GET') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const inspectorData = getDatabaseInspectorData();
       sendJson(res, 200, inspectorData);
       return true;
     }
 
     if (pathname === '/api/admin/tenant-data' && req.method === 'GET') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const userId = query.userId;
       if (!userId) {
         sendJson(res, 400, { error: 'userId is required' });
@@ -419,6 +599,7 @@ export async function handleApiRequest(req, res) {
     }
 
     if (pathname === '/api/admin/medicine/save' && req.method === 'POST') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const body = await parseJsonBody(req);
       if (!body.userId || !body.medicine) {
         sendJson(res, 400, { error: 'userId and medicine are required' });
@@ -430,6 +611,7 @@ export async function handleApiRequest(req, res) {
     }
 
     if (pathname === '/api/admin/medicine' && req.method === 'DELETE') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const userId = query.userId;
       const medId = query.medicineId;
       if (!userId || !medId) {
@@ -442,6 +624,7 @@ export async function handleApiRequest(req, res) {
     }
 
     if (pathname === '/api/admin/voucher/save' && req.method === 'POST') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const body = await parseJsonBody(req);
       if (!body.userId || !body.voucher) {
         sendJson(res, 400, { error: 'userId and voucher are required' });
@@ -453,6 +636,7 @@ export async function handleApiRequest(req, res) {
     }
 
     if (pathname === '/api/admin/voucher' && req.method === 'DELETE') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const userId = query.userId;
       const voucherId = query.voucherId;
       if (!userId || !voucherId) {
@@ -465,6 +649,7 @@ export async function handleApiRequest(req, res) {
     }
 
     if (pathname === '/api/admin/profile/save' && req.method === 'POST') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const body = await parseJsonBody(req);
       if (!body.userId || !body.profile) {
         sendJson(res, 400, { error: 'userId and profile are required' });
@@ -476,6 +661,7 @@ export async function handleApiRequest(req, res) {
     }
 
     if (pathname === '/api/admin/tenant' && req.method === 'DELETE') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const userId = query.userId;
       if (!userId) {
         sendJson(res, 400, { error: 'userId is required' });
@@ -487,13 +673,14 @@ export async function handleApiRequest(req, res) {
     }
 
     if (pathname === '/api/admin/download-sqlite' && req.method === 'GET') {
+      if (!requireAdminAuth(req, res, query)) return true;
       const fileName = query.file;
       if (!fileName || !fileName.endsWith('.sqlite')) {
         sendJson(res, 400, { error: 'Valid .sqlite file name required' });
         return true;
       }
 
-      const filePath = path.resolve(process.cwd(), 'data', 'databases', path.basename(fileName));
+      const filePath = path.join(DB_DIR, path.basename(fileName));
       if (!fs.existsSync(filePath)) {
         sendJson(res, 404, { error: 'Database file not found on disk' });
         return true;
@@ -512,8 +699,12 @@ export async function handleApiRequest(req, res) {
     sendJson(res, 404, { error: 'API endpoint not found', path: pathname });
     return true;
   } catch (error) {
-    console.error('API Error in', pathname, error);
-    sendJson(res, 500, { error: error.message || 'Internal Server Error' });
+    console.error('[API_INTERNAL_ERROR]', pathname, error);
+    // Generic error message for clients to avoid leaking stack traces, file paths, or DB schemas
+    sendJson(res, 500, { 
+      success: false, 
+      error: 'Internal Server Error' 
+    });
     return true;
   }
 }

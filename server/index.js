@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import url from 'node:url';
 import { handleApiRequest } from './apiRouter.js';
+import { DB_DIR, verifyDatabasePersistence } from './dbService.js';
 
 const PORT = process.env.PORT || 5001;
 const DIST_DIR = path.resolve(process.cwd(), 'dist');
@@ -22,6 +23,13 @@ const MIME_TYPES = {
 };
 
 const server = http.createServer(async (req, res) => {
+  // Apply Security Headers to every response
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(self)');
+
   try {
     // 1. Try handling API routes
     const handled = await handleApiRequest(req, res);
@@ -59,14 +67,25 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not Found' }));
   } catch (err) {
-    console.error('Server error:', err);
+    // Server-only logging to prevent information leakage (Addresses audit finding 1)
+    console.error('[CRITICAL_SERVER_ERROR]', req.method, req.url, err);
     res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: err.message || 'Internal Server Error' }));
+    res.end(JSON.stringify({ success: false, error: 'Internal Server Error' }));
   }
 });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ MedVault Server running on port ${PORT}`);
-  console.log(`📁 Database storage: ${path.resolve(process.cwd(), 'data/databases')}`);
+  
+  // Real storage verification (Addresses audit finding 3)
+  const persistenceInfo = verifyDatabasePersistence();
+  console.log(`📁 Database storage path: ${persistenceInfo.dbDir}`);
+  console.log(`🔒 Disk write verification: ${persistenceInfo.writable ? 'PASSED (Verified Writable)' : 'FAILED'}`);
+  console.log(`📦 Registered SQLite databases on disk: ${persistenceInfo.filesCount} files`);
+  if (persistenceInfo.isCustomDataDir) {
+    console.log(`💾 Custom/Persistent Disk detected via: ${persistenceInfo.customDataDirSource}`);
+  } else {
+    console.log(`ℹ️ Persistent disk note: Render Persistent Disk can be enabled via DATA_DIR environment variable.`);
+  }
   console.log(`🌐 Web root: ${DIST_DIR}`);
 });

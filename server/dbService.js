@@ -2,17 +2,76 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const DB_DIR = path.resolve(process.cwd(), 'data', 'databases');
+// Storage location: Support Render Persistent Disk (/var/data or custom DATA_DIR) with local fallback
+export const DB_DIR = process.env.DATA_DIR || 
+                      process.env.PERSISTENT_DATA_DIR || 
+                      process.env.RENDER_DISK_PATH || 
+                      path.resolve(process.cwd(), 'data', 'databases');
 
 // Ensure database directory exists
 if (!fs.existsSync(DB_DIR)) {
-  fs.mkdirSync(DB_DIR, { recursive: true });
+  try {
+    fs.mkdirSync(DB_DIR, { recursive: true });
+  } catch (err) {
+    console.error('Failed to create DB_DIR:', DB_DIR, err);
+  }
 }
 
-const CENTRAL_DB_PATH = path.join(DB_DIR, 'central_users_registry.sqlite');
+export const CENTRAL_DB_PATH = path.join(DB_DIR, 'central_users_registry.sqlite');
 
 // Cache open database connections
 const openDatabases = new Map();
+
+// -------------------------------------------------------------
+// REAL PERSISTENCE & DISK VERIFICATION (Addresses Render Storage audit)
+// -------------------------------------------------------------
+export function verifyDatabasePersistence() {
+  const result = {
+    dbDir: DB_DIR,
+    isCustomDataDir: !!(process.env.DATA_DIR || process.env.PERSISTENT_DATA_DIR || process.env.RENDER_DISK_PATH),
+    customDataDirSource: process.env.DATA_DIR ? 'DATA_DIR' : (process.env.PERSISTENT_DATA_DIR ? 'PERSISTENT_DATA_DIR' : (process.env.RENDER_DISK_PATH ? 'RENDER_DISK_PATH' : null)),
+    writable: false,
+    canaryFile: path.join(DB_DIR, '.persistence_verified'),
+    filesCount: 0,
+    files: [],
+    centralDbExists: fs.existsSync(CENTRAL_DB_PATH),
+    centralDbSize: 0,
+    timestamp: new Date().toISOString()
+  };
+
+  try {
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true });
+    }
+    const testPayload = `MEDVAULT_PERSISTENCE_CHECK_${Date.now()}`;
+    fs.writeFileSync(result.canaryFile, testPayload, 'utf8');
+    const readBack = fs.readFileSync(result.canaryFile, 'utf8');
+    result.writable = (readBack === testPayload);
+
+    if (fs.existsSync(DB_DIR)) {
+      const dirEntries = fs.readdirSync(DB_DIR);
+      for (const entry of dirEntries) {
+        if (entry.endsWith('.sqlite')) {
+          const fullPath = path.join(DB_DIR, entry);
+          const stat = fs.statSync(fullPath);
+          result.files.push({
+            name: entry,
+            sizeBytes: stat.size,
+            sizeKb: Math.round(stat.size / 1024 * 10) / 10,
+            modifiedAt: stat.mtime.toISOString()
+          });
+        }
+      }
+    }
+    result.filesCount = result.files.length;
+    if (fs.existsSync(CENTRAL_DB_PATH)) {
+      result.centralDbSize = fs.statSync(CENTRAL_DB_PATH).size;
+    }
+  } catch (err) {
+    result.error = err.message;
+  }
+  return result;
+}
 
 // -------------------------------------------------------------
 // 1. CENTRAL REGISTRY DATABASE (Stores all registered users & OTPs)
@@ -22,6 +81,15 @@ let centralDbInstance = null;
 function getCentralDb() {
   if (!centralDbInstance) {
     centralDbInstance = new DatabaseSync(CENTRAL_DB_PATH);
+    try {
+      centralDbInstance.exec(`
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA busy_timeout = 5000;
+      `);
+    } catch (e) {
+      console.warn('Could not set WAL on central DB:', e.message);
+    }
     // Initialize central registry tables
     centralDbInstance.exec(`
       CREATE TABLE IF NOT EXISTS users (
@@ -140,6 +208,13 @@ export function getUserDatabase(userId) {
   const isNewDb = !fs.existsSync(dbFilePath);
 
   const db = new DatabaseSync(dbFilePath);
+  try {
+    db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA busy_timeout = 5000;
+    `);
+  } catch (e) {}
 
   // Initialize all relational tables strictly for this user
   db.exec(`
