@@ -52,6 +52,7 @@ import { getDaysUntilExpiry } from './utils/expiryUtils';
 import { playUrgentAlertSound, playSuccessSound } from './utils/notificationSound';
 import { sendMedicineExpiryNotification } from './utils/browserNotification';
 import { sanitizePartyName } from './utils/excelUtils';
+import { buildMedicineFromScan, findMedicineMatch } from './utils/barcodeUtils';
 
 const AUDIO_KEY = 'medvault_audio_enabled_v1';
 const LANG_KEY = 'medvault_lang_pref_v1';
@@ -466,6 +467,37 @@ export default function App() {
   const handleEditMedicine = (med) => {
     setEditingMedicine(med);
     setIsAddModalOpen(true);
+  };
+
+  const handleAutoAddScannedMedicine = (parsedInfo) => {
+    if (!currentUser?.id) return null;
+
+    // 1. Check if already in inventory
+    const existing = findMedicineMatch(medicines, parsedInfo);
+
+    if (existing) {
+      const updated = {
+        ...existing,
+        stock: (parseInt(existing.stock, 10) || 0) + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      handleSaveMedicine(updated);
+      playSuccessSound();
+      return { medicine: updated, isNew: false };
+    }
+
+    // 2. Auto-build product and add directly into stock
+    const newMed = buildMedicineFromScan(parsedInfo);
+    if (!newMed) return null;
+
+    const medWithUser = {
+      ...newMed,
+      userId: currentUser.id,
+    };
+
+    handleSaveMedicine(medWithUser);
+    playSuccessSound();
+    return { medicine: medWithUser, isNew: true };
   };
 
   const handleAddNewFromScanner = (scannedData) => {
@@ -964,6 +996,7 @@ export default function App() {
         isOpen={isScannerModalOpen}
         onClose={() => setIsScannerModalOpen(false)}
         medicines={userIsolatedMedicines}
+        onAutoAddMedicine={handleAutoAddScannedMedicine}
         onOpenMedicineDetail={handleSelectMedicine}
         onEditMedicine={handleEditMedicine}
         onAddNewWithData={handleAddNewFromScanner}

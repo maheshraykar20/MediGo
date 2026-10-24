@@ -18,7 +18,8 @@ import {
   MapPin, 
   IndianRupee,
   RefreshCw,
-  Eye
+  Zap,
+  PackageCheck
 } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { parseMedicineBarcode, findMedicineMatch } from '../utils/barcodeUtils';
@@ -29,6 +30,7 @@ export default function BarcodeScannerModal({
   isOpen,
   onClose,
   medicines = [],
+  onAutoAddMedicine,
   onOpenMedicineDetail,
   onEditMedicine,
   onAddNewWithData,
@@ -36,8 +38,9 @@ export default function BarcodeScannerModal({
 }) {
   const isMr = lang === 'mr';
   const [activeTab, setActiveTab] = useState('camera'); // 'camera', 'upload', 'manual'
+  const [autoAddMode, setAutoAddMode] = useState(true); // Default: Auto-add to inventory immediately!
   const [manualInput, setManualInput] = useState('');
-  const [scanResult, setScanResult] = useState(null); // { parsed, match, scannedAt }
+  const [scanResult, setScanResult] = useState(null); // { raw, parsed, medicine, isNew, scannedAt }
   const [cameraError, setCameraError] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [facingMode, setFacingMode] = useState('environment'); // 'environment' (back) or 'user' (front)
@@ -67,16 +70,40 @@ export default function BarcodeScannerModal({
     playSuccessSound();
 
     const parsed = parseMedicineBarcode(decodedText);
-    const match = findMedicineMatch(medicines, parsed);
 
+    // AUTO-ADD FLOW (Requested by user):
+    // Directly add the product into the inventory item list upon scanning!
+    if (autoAddMode && onAutoAddMedicine) {
+      const res = onAutoAddMedicine(parsed);
+      if (res && res.medicine) {
+        setScanResult({
+          raw: decodedText,
+          parsed,
+          medicine: res.medicine,
+          isNew: res.isNew,
+          scannedAt: new Date().toLocaleTimeString(),
+        });
+
+        // Pause scanner so user can inspect and choose to edit or scan next
+        if (scannerRef.current && isScanning) {
+          try {
+            scannerRef.current.pause(true);
+          } catch (e) {}
+        }
+        return;
+      }
+    }
+
+    // Fallback search mode if auto-add is toggled off
+    const match = findMedicineMatch(medicines, parsed);
     setScanResult({
       raw: decodedText,
       parsed,
-      match,
+      medicine: match,
+      isNew: !match,
       scannedAt: new Date().toLocaleTimeString(),
     });
 
-    // Pause scanner once detected so it doesn't fire continuously
     if (scannerRef.current && isScanning) {
       try {
         scannerRef.current.pause(true);
@@ -256,26 +283,13 @@ export default function BarcodeScannerModal({
     setManualInput('');
   };
 
-  // Open Edit / Details Modal for found medicine
-  const handleOpenFoundMedicine = (medicine) => {
+  // Open Edit / Details Modal for medicine
+  const handleOpenEditMedicine = (medicine) => {
     onClose();
     if (onEditMedicine) {
       onEditMedicine(medicine);
     } else if (onOpenMedicineDetail) {
       onOpenMedicineDetail(medicine);
-    }
-  };
-
-  // Open Add Medicine Modal with scanned data
-  const handleAddScannedMedicine = () => {
-    if (!scanResult) return;
-    onClose();
-    if (onAddNewWithData) {
-      onAddNewWithData({
-        barcode: scanResult.parsed.barcode || scanResult.raw,
-        batchNo: scanResult.parsed.batchNo || '',
-        expiryDate: scanResult.parsed.expiryDate || '',
-      });
     }
   };
 
@@ -320,11 +334,19 @@ export default function BarcodeScannerModal({
               <ScanLine className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
-                {isMr ? 'औषध बारकोड / QR स्कॅनर' : 'Medicine Barcode & QR Scanner'}
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
+                  {isMr ? 'औषध बारकोड / QR स्कॅनर' : 'Medicine Barcode & QR Scanner'}
+                </h3>
+                {autoAddMode && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    <Zap className="w-3 h-3 fill-emerald-600 text-emerald-600" />
+                    <span>{isMr ? 'ऑटो ॲड चालू' : 'Auto-Add ON'}</span>
+                  </span>
+                )}
+              </div>
               <p className="text-[11px] text-slate-500 font-medium">
-                {isMr ? 'कॅमेऱ्यासमोर औषधाची स्ट्रिप किंवा बॉक्स धरा' : 'Scan strip, bottle or box to view full details'}
+                {isMr ? 'स्कॅन करताच औषध थेट साठ्यात जोडले जाईल' : 'Scanned products are added directly to your stock'}
               </p>
             </div>
           </div>
@@ -337,46 +359,61 @@ export default function BarcodeScannerModal({
           </button>
         </div>
 
-        {/* Tab Selection */}
-        <div className="flex items-center border-b border-slate-100 bg-white px-3 pt-2 gap-1">
-          <button
-            type="button"
-            onClick={() => { setActiveTab('camera'); setScanResult(null); }}
-            className={`flex-1 py-2 text-xs font-bold rounded-t-xl transition flex items-center justify-center gap-1.5 border-b-2 ${
-              activeTab === 'camera'
-                ? 'border-teal-600 text-teal-700 bg-teal-50/50'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Camera className="w-3.5 h-3.5" />
-            <span>{isMr ? 'कॅमेरा स्कॅन' : 'Live Camera'}</span>
-          </button>
+        {/* Tab Selection & Auto-Add Toggle */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between border-b border-slate-100 bg-white px-3 pt-2 gap-1.5">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => { setActiveTab('camera'); setScanResult(null); }}
+              className={`py-2 px-3 text-xs font-bold rounded-t-xl transition flex items-center justify-center gap-1.5 border-b-2 ${
+                activeTab === 'camera'
+                  ? 'border-teal-600 text-teal-700 bg-teal-50/50'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>{isMr ? 'कॅमेरा' : 'Camera'}</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => { setActiveTab('upload'); setScanResult(null); }}
-            className={`flex-1 py-2 text-xs font-bold rounded-t-xl transition flex items-center justify-center gap-1.5 border-b-2 ${
-              activeTab === 'upload'
-                ? 'border-teal-600 text-teal-700 bg-teal-50/50'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <span>{isMr ? 'फोटो अपलोड' : 'Upload Image'}</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => { setActiveTab('upload'); setScanResult(null); }}
+              className={`py-2 px-3 text-xs font-bold rounded-t-xl transition flex items-center justify-center gap-1.5 border-b-2 ${
+                activeTab === 'upload'
+                  ? 'border-teal-600 text-teal-700 bg-teal-50/50'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>{isMr ? 'फोटो अपलोड' : 'Upload'}</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => { setActiveTab('manual'); setScanResult(null); }}
-            className={`flex-1 py-2 text-xs font-bold rounded-t-xl transition flex items-center justify-center gap-1.5 border-b-2 ${
-              activeTab === 'manual'
-                ? 'border-teal-600 text-teal-700 bg-teal-50/50'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Keyboard className="w-3.5 h-3.5" />
-            <span>{isMr ? 'नंबर / गन स्कॅनर' : 'Manual / Gun'}</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => { setActiveTab('manual'); setScanResult(null); }}
+              className={`py-2 px-3 text-xs font-bold rounded-t-xl transition flex items-center justify-center gap-1.5 border-b-2 ${
+                activeTab === 'manual'
+                  ? 'border-teal-600 text-teal-700 bg-teal-50/50'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Keyboard className="w-3.5 h-3.5" />
+              <span>{isMr ? 'मॅन्युअल / गन' : 'Gun / Code'}</span>
+            </button>
+          </div>
+
+          {/* Auto-Add Switch */}
+          <div className="pb-1.5 sm:pb-0 flex items-center justify-end">
+            <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer select-none bg-slate-50 px-2.5 py-1 rounded-xl border border-slate-200 hover:bg-slate-100 transition">
+              <input
+                type="checkbox"
+                checked={autoAddMode}
+                onChange={(e) => setAutoAddMode(e.target.checked)}
+                className="w-3.5 h-3.5 accent-teal-600 rounded cursor-pointer"
+              />
+              <span>{isMr ? '⚡ थेट साठ्यात जोडा (Auto-Add)' : '⚡ Auto-Add to Stock'}</span>
+            </label>
+          </div>
         </div>
 
         {/* Content Area */}
@@ -404,7 +441,7 @@ export default function BarcodeScannerModal({
                       <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-teal-400 to-transparent absolute top-1/2 -translate-y-1/2 animate-pulse shadow-[0_0_8px_#2dd4bf]" />
                     </div>
                     <span className="text-[11px] font-bold text-white/90 bg-slate-900/80 px-2.5 py-1 rounded-full mt-3 backdrop-blur-xs">
-                      {isMr ? 'औषधाचा बारकोड बॉक्समध्ये आणा' : 'Align medicine barcode / QR inside frame'}
+                      {isMr ? 'औषधाचा बारकोड किंवा QR चौकोनात आणा' : 'Align medicine barcode / QR inside frame'}
                     </span>
                   </div>
                 )}
@@ -429,7 +466,7 @@ export default function BarcodeScannerModal({
               <div className="flex items-center justify-between text-xs bg-slate-50 p-2 rounded-xl border border-slate-200">
                 <span className="text-slate-500 font-semibold px-1">
                   {isScanning 
-                    ? (isMr ? '🟢 स्कॅनर सक्रिय आहे' : '🟢 Scanner Active') 
+                    ? (isMr ? '🟢 स्कॅनर सक्रिय (स्कॅन करताच ॲड होईल)' : '🟢 Scanner Active (Auto-Add Ready)') 
                     : (isMr ? 'कॅमेरा सज्ज होत आहे...' : 'Camera standby')}
                 </span>
 
@@ -444,7 +481,7 @@ export default function BarcodeScannerModal({
                           ? 'bg-amber-400 text-slate-950 border-amber-500' 
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                       }`}
-                      title={isMr ? 'फ्लॅशलाईट चालू/बंद' : 'Toggle Flashlight'}
+                      title={isMr ? 'फ्लॅश चालू/बंद' : 'Toggle Flashlight'}
                     >
                       <Flashlight className="w-3.5 h-3.5" />
                       <span className="text-[11px]">{torchOn ? 'ON' : 'Flash'}</span>
@@ -480,23 +517,17 @@ export default function BarcodeScannerModal({
                   <Upload className="w-6 h-6" />
                 </div>
                 <h4 className="font-bold text-sm text-slate-900 mb-1">
-                  {isMr ? 'औषधाचा किंवा स्ट्रिपचा फोटो निवडा' : 'Upload photo of Medicine Strip / Box'}
+                  {isMr ? 'औषध स्ट्रिप किंवा बॉक्सचा फोटो निवडा' : 'Upload photo of Medicine Strip / Box'}
                 </h4>
                 <p className="text-xs text-slate-500 max-w-xs mb-3">
                   {isMr 
-                    ? 'मोबाईल कॅमेऱ्याने काढलेला फोटो किंवा गॅलरीतून निवडा, सिस्टीम बारकोड आपोआप वाचेल.'
-                    : 'Select a clear photo from your gallery or take a picture with phone camera.'}
+                    ? 'फोटो अपलोड करताच बारकोड वाचून औषध थेट तुमच्या साठ्यात जोडले जाईल.'
+                    : 'Upload a photo to automatically decode and add the medicine to your stock.'}
                 </p>
                 <span className="px-4 py-1.5 bg-teal-600 group-hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-sm transition">
                   {isMr ? '📁 फोटो निवडा / Snap Photo' : '📁 Browse Image / Snap Photo'}
                 </span>
               </label>
-
-              <div className="text-[11px] text-slate-500 text-center">
-                {isMr 
-                  ? 'टीप: बारकोड व बॅच नंबर स्पष्ट दिसणारा फोटो वापरा.' 
-                  : 'Tip: Ensure barcode, QR code or batch number is clearly in focus.'}
-              </div>
             </div>
           )}
 
@@ -505,187 +536,133 @@ export default function BarcodeScannerModal({
             <form onSubmit={handleManualSubmit} className="space-y-3">
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1">
-                  {isMr ? 'बारकोड / बॅच नंबर टाका किंवा स्कॅनर गनने स्कॅन करा:' : 'Enter Barcode, Batch Number or Scan with Gun:'}
+                  {isMr ? 'बारकोड / QR नंबर टाका किंवा स्कॅनर गनने स्कॅन करा:' : 'Enter Barcode / QR or Scan with Gun:'}
                 </label>
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
                     value={manualInput}
                     onChange={(e) => setManualInput(e.target.value)}
-                    placeholder={isMr ? 'उदा. 8901234567890 किंवा BET-3321' : 'e.g. 8901234567890 or BET-3321'}
+                    placeholder={isMr ? 'उदा. 8906017461761 किंवा QR लिंक' : 'e.g. 8906017461761 or QR code'}
                     className="flex-1 px-3 py-2.5 text-xs sm:text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono font-bold"
                     autoFocus
                   />
                   <button
                     type="submit"
-                    className="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-sm transition shrink-0"
+                    className="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-sm transition shrink-0 cursor-pointer"
                   >
-                    {isMr ? 'शोधा' : 'Search'}
+                    {isMr ? 'साठ्यात जोडा' : 'Add to Stock'}
                   </button>
                 </div>
               </div>
 
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600 space-y-1">
-                <div className="font-bold text-slate-800">
-                  {isMr ? '💡 USB / Bluetooth बारकोड गन सपोर्ट:' : '💡 USB / Bluetooth Barcode Gun Support:'}
+                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-teal-600" />
+                  <span>{isMr ? 'थेट साठा नोंदणी (Instant Auto-Add):' : 'Instant Auto-Add Active:'}</span>
                 </div>
                 <p className="text-[11px] text-slate-500">
                   {isMr 
-                    ? 'जर तुम्ही मेडिकल स्टोअरमध्ये बारकोड स्कॅनर गन वापरत असाल, तर वरील इनपुटवर कर्सर ठेवून स्ट्रिप स्कॅन करा. ते आपोआप एंटर होईल.'
-                    : 'If you have a handheld USB/Bluetooth scanner gun, just point it at the medicine strip and press the trigger.'}
+                    ? 'बारकोड स्कॅनर गनने किंवा नंबर टाकून एंटर करताच औषध थेट तुमच्या स्टॉक लिस्टमध्ये सेव्ह होईल.'
+                    : 'Scanning with a barcode gun will instantly add the medicine product into your inventory.'}
                 </p>
               </div>
             </form>
           )}
 
           {/* ======================================================== */}
-          {/* RESULT CARD (Appears automatically when code is decoded) */}
+          {/* RESULT CARD: PRODUCT SUCCESSFULLY ADDED / UPDATED IN STOCK */}
           {/* ======================================================== */}
-          {scanResult && (
+          {scanResult && scanResult.medicine && (
             <div className="pt-2 animate-fadeIn space-y-3">
-              {/* CASE 1: MEDICINE FOUND IN INVENTORY */}
-              {scanResult.match ? (
-                <div className="bg-emerald-50/80 border-2 border-emerald-500/50 rounded-2xl p-4 space-y-3 shadow-md">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0">
-                        <CheckCircle2 className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
-                          {isMr ? '✅ औषध साठ्यात सापडले!' : '✅ Medicine Found in Stock!'}
-                        </span>
-                        <h4 className="text-base font-extrabold text-slate-900 leading-tight mt-0.5">
-                          {scanResult.match.name}
-                        </h4>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Scanned Medicine Key Details Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs pt-1">
-                    <div className="bg-white p-2 rounded-xl border border-emerald-200/60">
-                      <span className="text-[10px] text-slate-500 block">{isMr ? 'बॅच नंबर' : 'Batch No'}</span>
-                      <span className="font-mono font-bold text-slate-900">{scanResult.match.batchNo || '-'}</span>
-                    </div>
-
-                    <div className="bg-white p-2 rounded-xl border border-emerald-200/60">
-                      <span className="text-[10px] text-slate-500 block">{isMr ? 'मुदत (Expiry)' : 'Expiry Date'}</span>
-                      <span className="font-mono font-bold text-slate-900">{scanResult.match.expiryDate || '-'}</span>
-                    </div>
-
-                    <div className="bg-white p-2 rounded-xl border border-emerald-200/60">
-                      <span className="text-[10px] text-slate-500 block">{isMr ? 'उपलब्ध साठा' : 'Stock Qty'}</span>
-                      <span className="font-bold text-emerald-700">{scanResult.match.stock || 0} {scanResult.match.unit || 'Strips'}</span>
-                    </div>
-
-                    <div className="bg-white p-2 rounded-xl border border-emerald-200/60">
-                      <span className="text-[10px] text-slate-500 block">{isMr ? 'रॅक / जागा' : 'Rack Location'}</span>
-                      <span className="font-bold text-slate-800">{scanResult.match.rack || '-'}</span>
-                    </div>
-
-                    <div className="bg-white p-2 rounded-xl border border-emerald-200/60">
-                      <span className="text-[10px] text-slate-500 block">{isMr ? 'किंमत (MRP)' : 'Selling Price / MRP'}</span>
-                      <span className="font-bold text-slate-900">₹{parseFloat(scanResult.match.mrp || 0).toFixed(2)}</span>
-                    </div>
-
-                    <div className="bg-white p-2 rounded-xl border border-emerald-200/60">
-                      <span className="text-[10px] text-slate-500 block">{isMr ? 'खरेदी किंमत' : 'Purchase Cost'}</span>
-                      <span className="font-bold text-slate-700">₹{parseFloat(scanResult.match.purchasePrice || 0).toFixed(2)}</span>
-                    </div>
-                  </div>
-
-                  {/* Composition / Salt */}
-                  {scanResult.match.composition && (
-                    <div className="text-xs bg-white/80 p-2 rounded-xl border border-emerald-200/60">
-                      <span className="text-[10px] text-slate-500 font-semibold block">{isMr ? 'घटक / Salt:' : 'Salt Composition:'}</span>
-                      <span className="font-medium text-slate-800">{scanResult.match.composition}</span>
-                    </div>
-                  )}
-
-                  {/* Actions for Found Medicine */}
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenFoundMedicine(scanResult.match)}
-                      className="flex-1 py-2.5 px-4 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm shadow-teal-600/30 cursor-pointer"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                      <span>{isMr ? 'संपूर्ण तपशील पहा व संपादित करा' : 'View & Edit Medicine Details'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleScanNext}
-                      className="py-2 px-3 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>{isMr ? 'दुसरे स्कॅन करा' : 'Scan Next'}</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* CASE 2: MEDICINE NOT FOUND IN INVENTORY (NEW MEDICINE) */
-                <div className="bg-amber-50/90 border-2 border-amber-300 rounded-2xl p-4 space-y-3 shadow-md">
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shrink-0">
-                      <AlertCircle className="w-5 h-5" />
+              <div className="bg-emerald-50/90 border-2 border-emerald-500 rounded-2xl p-4 space-y-3 shadow-lg">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0 shadow-sm">
+                      <PackageCheck className="w-5 h-5" />
                     </div>
                     <div>
-                      <h4 className="text-sm font-bold text-amber-950 leading-tight">
-                        {isMr ? 'हे औषध सध्या तुमच्या साठ्यात सापडले नाही' : 'Medicine Not Found in Stock'}
-                      </h4>
-                      <p className="text-xs text-amber-800 mt-0.5">
-                        {isMr 
-                          ? 'स्कॅन केलेला कोड: ' 
-                          : 'Scanned Code: '}
-                        <span className="font-mono font-bold text-slate-900 bg-white px-1.5 py-0.5 rounded border border-amber-300">
-                          {scanResult.parsed.barcode || scanResult.raw}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-900 bg-emerald-200/90 px-2.5 py-0.5 rounded-full border border-emerald-400">
+                          {scanResult.isNew 
+                            ? (isMr ? '🎉 साठ्यात यशस्वीपणे जोडले गेले!' : '🎉 Added Directly to Stock!') 
+                            : (isMr ? '✅ साठ्यात आधीच उपलब्ध (+1 शिल्लक वाढवली)' : '✅ Already in Stock (+1 Qty Added)')}
                         </span>
-                      </p>
+                      </div>
+                      <h4 className="text-base sm:text-lg font-black text-slate-900 leading-tight mt-1">
+                        {scanResult.medicine.name}
+                      </h4>
                     </div>
-                  </div>
-
-                  {/* Scanned metadata info */}
-                  {(scanResult.parsed.batchNo || scanResult.parsed.expiryDate) && (
-                    <div className="flex flex-wrap gap-2 text-xs bg-white/90 p-2.5 rounded-xl border border-amber-200">
-                      {scanResult.parsed.batchNo && (
-                        <div>
-                          <span className="text-[10px] text-slate-500 block">{isMr ? 'शोधलेला बॅच:' : 'Detected Batch:'}</span>
-                          <span className="font-mono font-bold text-slate-900">{scanResult.parsed.batchNo}</span>
-                        </div>
-                      )}
-                      {scanResult.parsed.expiryDate && (
-                        <div>
-                          <span className="text-[10px] text-slate-500 block">{isMr ? 'शोधलेली मुदत:' : 'Detected Expiry:'}</span>
-                          <span className="font-mono font-bold text-slate-900">{scanResult.parsed.expiryDate}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Action to Add New Medicine with this barcode pre-filled */}
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={handleAddScannedMedicine}
-                      className="flex-1 py-2.5 px-4 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm shadow-teal-600/30 cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>{isMr ? '+ हे औषध नवीन साठ्यात जोडा' : '+ Add this Medicine to Stock'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleScanNext}
-                      className="py-2 px-3 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>{isMr ? 'पुन्हा स्कॅन करा' : 'Scan Again'}</span>
-                    </button>
                   </div>
                 </div>
-              )}
+
+                {/* Scanned Medicine Key Details Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs pt-1">
+                  <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                    <span className="text-[10px] text-slate-500 block">{isMr ? 'बॅच नंबर' : 'Batch No'}</span>
+                    <span className="font-mono font-bold text-slate-900">{scanResult.medicine.batchNo || '-'}</span>
+                  </div>
+
+                  <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                    <span className="text-[10px] text-slate-500 block">{isMr ? 'मुदत (Expiry)' : 'Expiry Date'}</span>
+                    <span className="font-mono font-bold text-slate-900">{scanResult.medicine.expiryDate || '-'}</span>
+                  </div>
+
+                  <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                    <span className="text-[10px] text-slate-500 block">{isMr ? 'उपलब्ध शिल्लक साठा' : 'Stock Quantity'}</span>
+                    <span className="font-black text-emerald-700 text-sm">{scanResult.medicine.stock} {scanResult.medicine.unit || 'Strips'}</span>
+                  </div>
+
+                  <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                    <span className="text-[10px] text-slate-500 block">{isMr ? 'रॅक / जागा' : 'Rack Location'}</span>
+                    <span className="font-bold text-slate-800">{scanResult.medicine.rack || 'Rack A-1'}</span>
+                  </div>
+
+                  <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                    <span className="text-[10px] text-slate-500 block">{isMr ? 'किंमत (MRP)' : 'Selling Price / MRP'}</span>
+                    <span className="font-black text-slate-900">₹{parseFloat(scanResult.medicine.mrp || 0).toFixed(2)}</span>
+                  </div>
+
+                  <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
+                    <span className="text-[10px] text-slate-500 block">{isMr ? 'खरेदी किंमत' : 'Purchase Cost'}</span>
+                    <span className="font-bold text-slate-700">₹{parseFloat(scanResult.medicine.purchasePrice || 0).toFixed(2)}</span>
+                  </div>
+                </div>
+
+                {/* Company & Barcode Badge */}
+                <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] bg-white/90 p-2 rounded-xl border border-emerald-200">
+                  <div className="text-slate-700 font-semibold truncate">
+                    <span className="text-slate-400">{isMr ? 'कंपनी: ' : 'Mfr: '}</span>
+                    <span>{scanResult.medicine.manufacturer || 'Pharmaceuticals'}</span>
+                  </div>
+                  <div className="font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-[10px] font-bold">
+                    Code: {scanResult.medicine.barcode || scanResult.raw}
+                  </div>
+                </div>
+
+                {/* Actions: Edit Name/Price, Scan Next, Done */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditMedicine(scanResult.medicine)}
+                    className="flex-1 py-2.5 px-4 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm shadow-teal-600/30 cursor-pointer"
+                    title={isMr ? 'औषधाचे नाव किंवा किंमत बदला' : 'Edit Medicine Name & Details'}
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    <span>{isMr ? '✏️ नाव किंवा किंमत बदला' : 'Edit Name & Details'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleScanNext}
+                    className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/30 cursor-pointer"
+                    title={isMr ? 'पुढील औषध स्कॅन करा' : 'Scan Next Medicine'}
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>{isMr ? '📷 पुढील औषध स्कॅन करा' : 'Scan Next'}</span>
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -693,15 +670,15 @@ export default function BarcodeScannerModal({
 
         {/* Footer */}
         <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-          <div className="text-[11px] text-slate-500">
-            {isMr ? 'सर्व GS1 बारकोड, EAN-13, 2D QR कोड सपोर्ट' : 'Supports GS1 DataMatrix, EAN-13, 1D/2D QR'}
+          <div className="text-[11px] text-slate-500 font-medium">
+            {isMr ? 'स्कॅन केलेले सर्व औषध आपोआप सेव्ह होते' : 'Scanned medicines are auto-saved to SQLite & inventory'}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition"
+            className="px-4 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
           >
-            {isMr ? 'बंद करा' : 'Close'}
+            {isMr ? 'पूर्ण झाले (Done)' : 'Done / Close'}
           </button>
         </div>
 
